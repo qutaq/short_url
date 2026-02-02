@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/qutaq/short_url/internal/repository"
 	"github.com/qutaq/short_url/internal/service"
 )
@@ -18,33 +19,30 @@ func setupHandler(t *testing.T) (http.Handler, *repository.MemoryRepository) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, testBaseURL)
 	h := NewShortenerHandler(svc)
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /", h.PostShorten)
-	mux.HandleFunc("GET /{id}", h.GetRedirect)
-	return mux, repo
+	r := chi.NewRouter()
+	r.Post("/", h.PostShorten)
+	r.Get("/{id}", h.GetRedirect)
+	return r, repo
 }
 
 func TestPostShorten_MethodNotAllowed(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "http://test/", nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("PostShorten GET: status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
 	}
-	if body := rec.Body.String(); body != "Method Not Allowed\n" {
-		t.Errorf("PostShorten GET: body = %q, want %q", body, "Method Not Allowed\n")
-	}
 }
 
 func TestPostShorten_EmptyBody(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "http://test/", nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("PostShorten empty body: status = %d, want %d", rec.Code, http.StatusBadRequest)
@@ -52,7 +50,7 @@ func TestPostShorten_EmptyBody(t *testing.T) {
 }
 
 func TestPostShorten_InvalidURL(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	tests := []string{
 		"",
@@ -67,7 +65,7 @@ func TestPostShorten_InvalidURL(t *testing.T) {
 		t.Run(strings.ReplaceAll(rawURL, " ", "_"), func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://test/", bytes.NewBufferString(rawURL))
 			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, req)
+			r.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusBadRequest {
 				t.Errorf("PostShorten %q: status = %d, want %d", rawURL, rec.Code, http.StatusBadRequest)
@@ -77,11 +75,11 @@ func TestPostShorten_InvalidURL(t *testing.T) {
 }
 
 func TestPostShorten_ValidURL(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "http://test/", bytes.NewBufferString("https://example.com/page"))
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
 		t.Errorf("PostShorten valid URL: status = %d, want %d", rec.Code, http.StatusCreated)
@@ -99,11 +97,11 @@ func TestPostShorten_ValidURL(t *testing.T) {
 }
 
 func TestPostShorten_ValidURLWithWhitespace(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "http://test/", bytes.NewBufferString("  https://example.com  "))
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
 		t.Errorf("PostShorten trimmed URL: status = %d, want %d", rec.Code, http.StatusCreated)
@@ -111,11 +109,11 @@ func TestPostShorten_ValidURLWithWhitespace(t *testing.T) {
 }
 
 func TestGetRedirect_RootPath(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "http://test/", nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GetRedirect root path: status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
@@ -123,11 +121,11 @@ func TestGetRedirect_RootPath(t *testing.T) {
 }
 
 func TestGetRedirect_UnknownID(t *testing.T) {
-	mux, _ := setupHandler(t)
+	r, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "http://test/unknown123", nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("GetRedirect unknown id: status = %d, want %d", rec.Code, http.StatusBadRequest)
@@ -135,7 +133,7 @@ func TestGetRedirect_UnknownID(t *testing.T) {
 }
 
 func TestGetRedirect_KnownID(t *testing.T) {
-	mux, repo := setupHandler(t)
+	r, repo := setupHandler(t)
 
 	originalURL := "https://example.com/original"
 	id := "abc12345"
@@ -145,7 +143,7 @@ func TestGetRedirect_KnownID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://test/"+id, nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTemporaryRedirect {
 		t.Errorf("GetRedirect known id: status = %d, want %d", rec.Code, http.StatusTemporaryRedirect)
