@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/qutaq/short_url/internal/service"
 )
 
@@ -44,7 +46,7 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
