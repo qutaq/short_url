@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,6 +18,17 @@ type ShortenerHandler struct {
 
 func NewShortenerHandler(shortener *service.Shortener) *ShortenerHandler {
 	return &ShortenerHandler{shortener: shortener}
+}
+
+func statusFromError(err error) (code int, body string) {
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		return http.StatusNotFound, "Not Found"
+	case errors.Is(err, service.ErrInvalidInput):
+		return http.StatusBadRequest, "Bad Request"
+	default:
+		return http.StatusInternalServerError, "Internal Server Error"
+	}
 }
 
 func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +49,8 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	}
 	shortURL, err := h.shortener.Shorten(rawURL)
 	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -53,7 +66,8 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 	originalURL, err := h.shortener.GetOriginal(id)
 	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
 		return
 	}
 	w.Header().Set("Location", originalURL)

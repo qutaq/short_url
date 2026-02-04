@@ -8,10 +8,14 @@ import (
 	"github.com/qutaq/short_url/internal/repository"
 )
 
-const shortIDLen = 8
+const (
+	shortIDLen     = 8
+	maxSaveRetries = 5
+)
 
 var (
-	ErrNotFound = errors.New("shortener: url not found")
+	ErrNotFound     = errors.New("url not found")
+	ErrInvalidInput = errors.New("invalid input")
 )
 
 type Shortener struct {
@@ -25,16 +29,16 @@ func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 
 func (s *Shortener) Shorten(url string) (string, error) {
 	if url == "" {
-		return "", errors.New("shortener: url is empty")
+		return "", ErrInvalidInput
 	}
 	id, err := s.generateUniqueID()
 	if err != nil {
 		return "", err
 	}
-	for {
+	for range maxSaveRetries {
 		err = s.repo.Save(id, url)
 		if err == nil {
-			break
+			return s.baseURL + "/" + id, nil
 		}
 		if !errors.Is(err, repository.ErrConflict) {
 			return "", err
@@ -44,7 +48,7 @@ func (s *Shortener) Shorten(url string) (string, error) {
 			return "", err
 		}
 	}
-	return s.baseURL + "/" + id, nil
+	return "", fmt.Errorf("failed to save after %d retries: %w", maxSaveRetries, repository.ErrConflict)
 }
 
 func (s *Shortener) GetOriginal(id string) (string, error) {
