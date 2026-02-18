@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,7 @@ func setupHandler(t *testing.T) (http.Handler, *repository.MemoryRepository) {
 	h := NewShortenerHandler(svc)
 	r := chi.NewRouter()
 	r.Post("/", h.PostShorten)
+	r.Post("/api/shorten", h.PostShortenJSON)
 	r.Get("/{id}", h.GetRedirect)
 	return r, repo
 }
@@ -150,6 +152,91 @@ func TestGetRedirect_KnownID(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != originalURL {
 		t.Errorf("GetRedirect Location = %q, want %q", loc, originalURL)
+	}
+}
+
+func TestPostShortenJSON_ValidURL(t *testing.T) {
+	r, _ := setupHandler(t)
+
+	body, _ := json.Marshal(map[string]string{"url": "https://practicum.yandex.ru"})
+	req := httptest.NewRequest(http.MethodPost, "http://test/api/shorten", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("PostShortenJSON valid URL: status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("PostShortenJSON Content-Type = %q, want application/json", ct)
+	}
+
+	var resp shortenResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("PostShortenJSON: failed to decode response: %v", err)
+	}
+	if resp.Result == "" || !strings.HasPrefix(resp.Result, testBaseURL+"/") {
+		t.Errorf("PostShortenJSON result = %q, want prefix %q", resp.Result, testBaseURL+"/")
+	}
+}
+
+func TestPostShortenJSON_EmptyURL(t *testing.T) {
+	r, _ := setupHandler(t)
+
+	body, _ := json.Marshal(map[string]string{"url": ""})
+	req := httptest.NewRequest(http.MethodPost, "http://test/api/shorten", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("PostShortenJSON empty URL: status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPostShortenJSON_InvalidURL(t *testing.T) {
+	r, _ := setupHandler(t)
+
+	tests := []string{"not-a-url", "://host", "http://", "no-scheme.com"}
+	for _, rawURL := range tests {
+		t.Run(rawURL, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"url": rawURL})
+			req := httptest.NewRequest(http.MethodPost, "http://test/api/shorten", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("PostShortenJSON %q: status = %d, want %d", rawURL, rec.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestPostShortenJSON_InvalidJSON(t *testing.T) {
+	r, _ := setupHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "http://test/api/shorten", bytes.NewBufferString("{invalid"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("PostShortenJSON invalid JSON: status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPostShortenJSON_MissingURLField(t *testing.T) {
+	r, _ := setupHandler(t)
+
+	body, _ := json.Marshal(map[string]string{"link": "https://example.com"})
+	req := httptest.NewRequest(http.MethodPost, "http://test/api/shorten", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("PostShortenJSON missing url field: status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 

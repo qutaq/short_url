@@ -31,6 +31,7 @@ func main() {
 	h := handler.NewShortenerHandler(shortener)
 
 	r.Post("/", h.PostShorten)
+	r.Post("/api/shorten", h.PostShortenJSON)
 	r.Get("/{id}", h.GetRedirect)
 
 	log.Println("Server starting at", cfg.ServerAddr)

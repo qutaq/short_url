@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +12,14 @@ import (
 
 	"github.com/qutaq/short_url/internal/service"
 )
+
+type shortenRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenResponse struct {
+	Result string `json:"result"`
+}
 
 type ShortenerHandler struct {
 	shortener *service.Shortener
@@ -72,6 +81,32 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Request) {
+	var req shortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	rawURL := strings.TrimSpace(req.URL)
+	if rawURL == "" || !isValidURL(rawURL) {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	shortURL, err := h.shortener.Shorten(rawURL)
+	if err != nil {
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
 }
 
 func isValidURL(s string) bool {
