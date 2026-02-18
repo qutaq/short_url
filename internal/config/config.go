@@ -6,18 +6,21 @@ import (
 )
 
 const (
-	defaultServerAddr = ":8080"
-	defaultBaseURL    = "http://localhost:8080"
+	defaultServerAddr     = ":8080"
+	defaultBaseURL        = "http://localhost:8080"
+	defaultFileStoragePath = "urls.json"
 )
 
 var (
-	serverAddr = flag.String("a", defaultServerAddr, "HTTP server address")
-	baseURL    = flag.String("b", defaultBaseURL, "Base URL for shortened links")
+	serverAddr      = flag.String("a", defaultServerAddr, "HTTP server address")
+	baseURL         = flag.String("b", defaultBaseURL, "Base URL for shortened links")
+	fileStoragePath = flag.String("f", defaultFileStoragePath, "Path to file storage for URLs")
 )
 
 type Config struct {
-	ServerAddr string
-	BaseURL    string
+	ServerAddr      string
+	BaseURL         string
+	FileStoragePath string
 }
 
 func Load() *Config {
@@ -29,8 +32,9 @@ func Load() *Config {
 	})
 
 	return &Config{
-		ServerAddr: resolve("SERVER_ADDRESS", *serverAddr, flagSet["a"], defaultServerAddr),
-		BaseURL:    resolve("BASE_URL", *baseURL, flagSet["b"], defaultBaseURL),
+		ServerAddr:      resolve("SERVER_ADDRESS", *serverAddr, flagSet["a"], defaultServerAddr),
+		BaseURL:         resolve("BASE_URL", *baseURL, flagSet["b"], defaultBaseURL),
+		FileStoragePath: resolve("FILE_STORAGE_PATH", *fileStoragePath, flagSet["f"], defaultFileStoragePath),
 	}
 }
 

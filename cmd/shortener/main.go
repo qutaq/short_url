@@ -27,7 +27,16 @@ func main() {
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.GzipMiddleware)
 
-	repo := repository.NewMemoryRepository()
+	var repo repository.URLRepository
+	if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
+		if err != nil {
+			log.Fatal("failed to open file storage:", err)
+		}
+		repo = fileRepo
+	} else {
+		repo = repository.NewMemoryRepository()
+	}
 	shortener := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.NewShortenerHandler(shortener)
 
