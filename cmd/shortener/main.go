@@ -25,6 +25,7 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestLogger(logger))
+	r.Use(middleware.GzipMiddleware)
 
 	repo := repository.NewMemoryRepository()
 	shortener := service.NewShortener(repo, cfg.BaseURL)
