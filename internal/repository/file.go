@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -39,10 +41,18 @@ func (r *FileRepository) Save(id, url string) error {
 	if _, exists := r.data[id]; exists {
 		return ErrConflict
 	}
+
+	rec := urlRecord{
+		UUID:        strconv.Itoa(r.nextUUID),
+		ShortURL:    id,
+		OriginalURL: url,
+	}
+	if err := r.appendRecord(rec); err != nil {
+		return err
+	}
 	r.data[id] = url
 	r.nextUUID++
-
-	return r.flush()
+	return nil
 }
 
 func (r *FileRepository) Get(id string) (string, bool) {
@@ -64,35 +74,38 @@ func (r *FileRepository) load() error {
 		return nil
 	}
 
-	var records []urlRecord
-	if err := json.Unmarshal(raw, &records); err != nil {
-		return err
-	}
-
-	for _, rec := range records {
-		r.data[rec.ShortURL] = rec.OriginalURL
-		if n, err := strconv.Atoi(rec.UUID); err == nil && n >= r.nextUUID {
-			r.nextUUID = n + 1
+	scanner := bufio.NewScanner(strings.NewReader(string(raw)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
 		}
+		var rec urlRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			return err
+		}
+		r.applyRecord(rec)
 	}
-	return nil
+	return scanner.Err()
 }
 
-func (r *FileRepository) flush() error {
-	records := make([]urlRecord, 0, len(r.data))
-	i := 1
-	for shortURL, originalURL := range r.data {
-		records = append(records, urlRecord{
-			UUID:        strconv.Itoa(i),
-			ShortURL:    shortURL,
-			OriginalURL: originalURL,
-		})
-		i++
+func (r *FileRepository) applyRecord(rec urlRecord) {
+	r.data[rec.ShortURL] = rec.OriginalURL
+	if n, err := strconv.Atoi(rec.UUID); err == nil && n >= r.nextUUID {
+		r.nextUUID = n + 1
 	}
+}
 
-	raw, err := json.MarshalIndent(records, "", "  ")
+func (r *FileRepository) appendRecord(rec urlRecord) error {
+	f, err := os.OpenFile(r.filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.filePath, raw, 0644)
+	defer f.Close()
+	line, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(line, '\n'))
+	return err
 }

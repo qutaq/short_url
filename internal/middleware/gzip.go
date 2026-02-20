@@ -50,10 +50,13 @@ func (w *gzipResponseWriter) chooseCompression(ct string) {
 	base = strings.TrimSpace(base)
 
 	if compressibleTypes[base] {
+		gz, err := gzip.NewWriterLevel(w.ResponseWriter, gzip.BestSpeed)
+		if err != nil {
+			return
+		}
 		w.compress = true
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Del("Content-Length")
-		gz, _ := gzip.NewWriterLevel(w.ResponseWriter, gzip.BestSpeed)
 		w.writer = gz
 	}
 }
