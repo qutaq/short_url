@@ -23,6 +23,20 @@ func (r *MemoryRepository) Save(id, url string) error {
 	return nil
 }
 
+func (r *MemoryRepository) SaveBatch(entries []BatchEntry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range entries {
+		if _, exists := r.data[e.ID]; exists {
+			return ErrConflict
+		}
+	}
+	for _, e := range entries {
+		r.data[e.ID] = e.URL
+	}
+	return nil
+}
+
 func (r *MemoryRepository) Get(id string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

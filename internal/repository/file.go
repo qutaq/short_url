@@ -55,6 +55,22 @@ func (r *FileRepository) Save(id, url string) error {
 	return nil
 }
 
+func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, e := range entries {
+		if _, exists := r.data[e.ID]; exists {
+			return ErrConflict
+		}
+	}
+	for _, e := range entries {
+		r.data[e.ID] = e.URL
+		r.nextUUID++
+	}
+	return r.flush()
+}
+
 func (r *FileRepository) Get(id string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

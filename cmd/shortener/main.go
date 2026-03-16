@@ -71,6 +71,7 @@ func main() {
 	r.Get("/ping", handler.PingDB(db))
 	r.Post("/", h.PostShorten)
 	r.Post("/api/shorten", h.PostShortenJSON)
+	r.Post("/api/shorten/batch", h.PostShortenBatch)
 	r.Get("/{id}", h.GetRedirect)
 
 	log.Println("Server starting at", cfg.ServerAddr)

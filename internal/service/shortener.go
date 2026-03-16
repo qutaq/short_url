@@ -22,6 +22,15 @@ type Shortener struct {
 	repo    repository.URLRepository
 	baseURL string
 }
+type BatchInput struct {
+	CorrelationID string
+	OriginalURL   string
+}
+
+type BatchOutput struct {
+	CorrelationID string
+	ShortURL      string
+}
 
 func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 	return &Shortener{repo: repo, baseURL: baseURL}
@@ -49,6 +58,53 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("failed to save after %d retries: %w", maxSaveRetries, repository.ErrConflict)
+}
+func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
+	if len(items) == 0 {
+		return nil, ErrInvalidInput
+	}
+	for _, item := range items {
+		if item.OriginalURL == "" {
+			return nil, ErrInvalidInput
+		}
+	}
+
+	entries := make([]repository.BatchEntry, len(items))
+	results := make([]BatchOutput, len(items))
+
+	for i, item := range items {
+		id, err := s.generateUniqueID()
+		if err != nil {
+			return nil, err
+		}
+		entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL}
+		results[i] = BatchOutput{
+			CorrelationID: item.CorrelationID,
+			ShortURL:      s.baseURL + "/" + id,
+		}
+	}
+
+	for attempt := range maxSaveRetries {
+		err := s.repo.SaveBatch(entries)
+		if err == nil {
+			return results, nil
+		}
+		if !errors.Is(err, repository.ErrConflict) {
+			return nil, err
+		}
+		if attempt == maxSaveRetries-1 {
+			break
+		}
+		for i, item := range items {
+			id, err := s.generateUniqueID()
+			if err != nil {
+				return nil, err
+			}
+			entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL}
+			results[i].ShortURL = s.baseURL + "/" + id
+		}
+	}
+	return nil, fmt.Errorf("failed to save batch after %d retries: %w", maxSaveRetries, repository.ErrConflict)
 }
 
 func (s *Shortener) GetOriginal(id string) (string, error) {
