@@ -112,6 +112,10 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 
 func PingDB(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 		if err := db.PingContext(r.Context()); err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
