@@ -9,4 +9,5 @@ type URLRepository interface {
 	SaveBatch(entries []BatchEntry) error
 
 	Get(id string) (url string, ok bool)
+	GetByOriginalURL(url string) (id string, ok bool)
 }

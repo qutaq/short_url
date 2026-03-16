@@ -18,6 +18,7 @@ type urlRecord struct {
 type FileRepository struct {
 	mu       sync.RWMutex
 	data     map[string]string
+	reverse  map[string]string // original_url → short_id
 	filePath string
 	nextUUID int
 }
@@ -25,6 +26,7 @@ type FileRepository struct {
 func NewFileRepository(filePath string) (*FileRepository, error) {
 	r := &FileRepository{
 		data:     make(map[string]string),
+		reverse:  make(map[string]string),
 		filePath: filePath,
 		nextUUID: 1,
 	}
@@ -38,6 +40,9 @@ func (r *FileRepository) Save(id, url string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if _, exists := r.reverse[url]; exists {
+		return ErrURLExists
+	}
 	if _, exists := r.data[id]; exists {
 		return ErrConflict
 	}
@@ -51,6 +56,7 @@ func (r *FileRepository) Save(id, url string) error {
 		return err
 	}
 	r.data[id] = url
+	r.reverse[url] = id
 	r.nextUUID++
 	return nil
 }
@@ -60,12 +66,16 @@ func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
 	defer r.mu.Unlock()
 
 	for _, e := range entries {
+		if _, exists := r.reverse[e.URL]; exists {
+			return ErrURLExists
+		}
 		if _, exists := r.data[e.ID]; exists {
 			return ErrConflict
 		}
 	}
 	for _, e := range entries {
 		r.data[e.ID] = e.URL
+		r.reverse[e.URL] = e.ID
 		r.nextUUID++
 	}
 	return r.flush()
@@ -76,6 +86,13 @@ func (r *FileRepository) Get(id string) (string, bool) {
 	defer r.mu.RUnlock()
 	url, ok := r.data[id]
 	return url, ok
+}
+
+func (r *FileRepository) GetByOriginalURL(url string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.reverse[url]
+	return id, ok
 }
 
 func (r *FileRepository) load() error {
@@ -107,6 +124,7 @@ func (r *FileRepository) load() error {
 
 func (r *FileRepository) applyRecord(rec urlRecord) {
 	r.data[rec.ShortURL] = rec.OriginalURL
+	r.reverse[rec.OriginalURL] = rec.ShortURL
 	if n, err := strconv.Atoi(rec.UUID); err == nil && n >= r.nextUUID {
 		r.nextUUID = n + 1
 	}

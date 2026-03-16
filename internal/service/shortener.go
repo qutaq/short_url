@@ -16,6 +16,7 @@ const (
 var (
 	ErrNotFound     = errors.New("url not found")
 	ErrInvalidInput = errors.New("invalid input")
+	ErrURLConflict  = errors.New("original url already exists")
 )
 
 type Shortener struct {
@@ -49,6 +50,9 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		if err == nil {
 			return s.baseURL + "/" + id, nil
 		}
+		if errors.Is(err, repository.ErrURLExists) {
+			return s.findExistingShortURL(url)
+		}
 		if !errors.Is(err, repository.ErrConflict) {
 			return "", err
 		}
@@ -58,6 +62,14 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("failed to save after %d retries: %w", maxSaveRetries, repository.ErrConflict)
+}
+
+func (s *Shortener) findExistingShortURL(url string) (string, error) {
+	existingID, ok := s.repo.GetByOriginalURL(url)
+	if !ok {
+		return "", fmt.Errorf("original url conflict but record not found")
+	}
+	return s.baseURL + "/" + existingID, ErrURLConflict
 }
 func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
 	if len(items) == 0 {

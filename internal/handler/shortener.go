@@ -69,6 +69,12 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	}
 	shortURL, err := h.shortener.Shorten(rawURL)
 	if err != nil {
+		if errors.Is(err, service.ErrURLConflict) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(shortURL))
+			return
+		}
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
 		return
@@ -110,6 +116,12 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 
 	shortURL, err := h.shortener.Shorten(rawURL)
 	if err != nil {
+		if errors.Is(err, service.ErrURLConflict) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
+			return
+		}
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
 		return
