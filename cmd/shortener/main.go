@@ -21,6 +21,7 @@ import (
 	"github.com/qutaq/short_url/internal/service"
 )
 
+//go:embed migrations/*.sql
 var migrationsFS embed.FS
 
 func main() {
