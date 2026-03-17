@@ -145,19 +145,26 @@ func (r *FileRepository) appendRecord(rec urlRecord) error {
 }
 
 func (r *FileRepository) flush() error {
-	records := make([]urlRecord, 0, len(r.data))
-	i := 1
-	for shortURL, originalURL := range r.data {
-		records = append(records, urlRecord{
-			UUID:        strconv.Itoa(i),
-			ShortURL:    shortURL,
-			OriginalURL: originalURL,
-		})
-		i++
-	}
-	raw, err := json.MarshalIndent(records, "", "  ")
+	f, err := os.Create(r.filePath)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.filePath, raw, 0644)
+	defer f.Close()
+	i := 1
+	for shortURL, originalURL := range r.data {
+		rec := urlRecord{
+			UUID:        strconv.Itoa(i),
+			ShortURL:    shortURL,
+			OriginalURL: originalURL,
+		}
+		line, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(append(line, '\n')); err != nil {
+			return err
+		}
+		i++
+	}
+	return nil
 }
