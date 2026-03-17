@@ -71,6 +71,7 @@ func (s *Shortener) findExistingShortURL(url string) (string, error) {
 	}
 	return s.baseURL + "/" + existingID, ErrURLConflict
 }
+
 func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
 	if len(items) == 0 {
 		return nil, ErrInvalidInput
@@ -101,6 +102,9 @@ func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
 		if err == nil {
 			return results, nil
 		}
+		if errors.Is(err, repository.ErrURLExists) {
+			return s.shortenBatchOneByOne(entries, results)
+		}
 		if !errors.Is(err, repository.ErrConflict) {
 			return nil, err
 		}
@@ -117,6 +121,42 @@ func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
 		}
 	}
 	return nil, fmt.Errorf("failed to save batch after %d retries: %w", maxSaveRetries, repository.ErrConflict)
+}
+
+func (s *Shortener) shortenBatchOneByOne(entries []repository.BatchEntry, results []BatchOutput) ([]BatchOutput, error) {
+	for i := range entries {
+		saved := false
+		for attempt := 0; attempt < maxSaveRetries && !saved; attempt++ {
+			err := s.repo.Save(entries[i].ID, entries[i].URL)
+			if err == nil {
+				results[i].ShortURL = s.baseURL + "/" + entries[i].ID
+				saved = true
+				break
+			}
+			if errors.Is(err, repository.ErrURLExists) {
+				existingID, ok := s.repo.GetByOriginalURL(entries[i].URL)
+				if !ok {
+					return nil, fmt.Errorf("original url exists but record not found")
+				}
+				results[i].ShortURL = s.baseURL + "/" + existingID
+				saved = true
+				break
+			}
+			if errors.Is(err, repository.ErrConflict) {
+				id, idErr := s.generateUniqueID()
+				if idErr != nil {
+					return nil, idErr
+				}
+				entries[i].ID = id
+				continue
+			}
+			return nil, err
+		}
+		if !saved {
+			return nil, fmt.Errorf("failed to save batch item after %d retries: %w", maxSaveRetries, repository.ErrConflict)
+		}
+	}
+	return results, nil
 }
 
 func (s *Shortener) GetOriginal(id string) (string, error) {
