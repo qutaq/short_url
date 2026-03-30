@@ -74,6 +74,7 @@ func main() {
 	r.Post("/api/shorten", h.PostShortenJSON)
 	r.Post("/api/shorten/batch", h.PostShortenBatch)
 	r.Get("/api/user/urls", h.GetUserURLs)
+	r.Delete("/api/user/urls", h.DeleteUserURLs)
 	r.Get("/{id}", h.GetRedirect)
 
 	log.Println("Server starting at", cfg.ServerAddr)

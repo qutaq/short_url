@@ -15,7 +15,8 @@ type URLRepository interface {
 	Save(id, url, userID string) error
 	SaveBatch(entries []BatchEntry) error
 
-	Get(id string) (url string, ok bool)
+	Get(id string) (url string, err error)
 	GetByOriginalURL(url string) (id string, ok bool)
 	GetURLsByUser(userID string) ([]URLPair, error)
+	DeleteUserURLs(shortIDs []string, userID string) error
 }

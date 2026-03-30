@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/qutaq/short_url/internal/repository"
 )
@@ -17,11 +18,18 @@ var (
 	ErrNotFound     = errors.New("url not found")
 	ErrInvalidInput = errors.New("invalid input")
 	ErrURLConflict  = errors.New("original url already exists")
+	ErrDeleted      = errors.New("url has been deleted")
 )
+
+type deleteTask struct {
+	shortID string
+	userID  string
+}
 
 type Shortener struct {
 	repo    repository.URLRepository
 	baseURL string
+	delCh   chan deleteTask
 }
 type BatchInput struct {
 	CorrelationID string
@@ -39,7 +47,13 @@ type UserURLOutput struct {
 }
 
 func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
-	return &Shortener{repo: repo, baseURL: baseURL}
+	s := &Shortener{
+		repo:    repo,
+		baseURL: baseURL,
+		delCh:   make(chan deleteTask, 1024),
+	}
+	go s.runDeleteWorker()
+	return s
 }
 
 func (s *Shortener) Shorten(url, userID string) (string, error) {
@@ -165,11 +179,71 @@ func (s *Shortener) shortenBatchOneByOne(entries []repository.BatchEntry, result
 }
 
 func (s *Shortener) GetOriginal(id string) (string, error) {
-	url, ok := s.repo.Get(id)
-	if !ok {
+	url, err := s.repo.Get(id)
+	if err != nil {
+		if errors.Is(err, repository.ErrDeleted) {
+			return "", ErrDeleted
+		}
 		return "", ErrNotFound
 	}
 	return url, nil
+}
+
+func (s *Shortener) DeleteUserURLs(shortIDs []string, userID string) {
+	inputCh := generateDeleteTasks(shortIDs, userID)
+	go func() {
+		for task := range inputCh {
+			s.delCh <- task
+		}
+	}()
+}
+
+func generateDeleteTasks(shortIDs []string, userID string) <-chan deleteTask {
+	ch := make(chan deleteTask)
+	go func() {
+		defer close(ch)
+		for _, id := range shortIDs {
+			ch <- deleteTask{shortID: id, userID: userID}
+		}
+	}()
+	return ch
+}
+
+func (s *Shortener) runDeleteWorker() {
+	const (
+		batchSize    = 100
+		flushTimeout = 5 * time.Second
+	)
+	ticker := time.NewTicker(flushTimeout)
+	defer ticker.Stop()
+
+	buf := make([]deleteTask, 0, batchSize)
+
+	for {
+		select {
+		case task := <-s.delCh:
+			buf = append(buf, task)
+			if len(buf) >= batchSize {
+				s.flushDeleteBatch(buf)
+				buf = make([]deleteTask, 0, batchSize)
+			}
+		case <-ticker.C:
+			if len(buf) > 0 {
+				s.flushDeleteBatch(buf)
+				buf = make([]deleteTask, 0, batchSize)
+			}
+		}
+	}
+}
+
+func (s *Shortener) flushDeleteBatch(tasks []deleteTask) {
+	byUser := make(map[string][]string)
+	for _, t := range tasks {
+		byUser[t.userID] = append(byUser[t.userID], t.shortID)
+	}
+	for userID, ids := range byUser {
+		_ = s.repo.DeleteUserURLs(ids, userID)
+	}
 }
 
 func (s *Shortener) GetUserURLs(userID string) ([]UserURLOutput, error) {

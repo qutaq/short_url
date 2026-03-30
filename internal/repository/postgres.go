@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgerrcode"
@@ -80,17 +82,45 @@ func (r *PostgresRepository) SaveBatch(entries []BatchEntry) error {
 	return tx.Commit()
 }
 
-func (r *PostgresRepository) Get(id string) (string, bool) {
+func (r *PostgresRepository) Get(id string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var originalURL string
+	var isDeleted bool
 	err := r.db.QueryRowContext(ctx,
-		`SELECT original_url FROM urls WHERE short_id = $1`, id).Scan(&originalURL)
+		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id).Scan(&originalURL, &isDeleted)
 	if err != nil {
-		return "", false
+		return "", ErrNotFound
 	}
-	return originalURL, true
+	if isDeleted {
+		return "", ErrDeleted
+	}
+	return originalURL, nil
+}
+
+func (r *PostgresRepository) DeleteUserURLs(shortIDs []string, userID string) error {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	placeholders := make([]string, len(shortIDs))
+	args := make([]interface{}, 0, len(shortIDs)+1)
+	for i, id := range shortIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args = append(args, id)
+	}
+	args = append(args, userID)
+
+	query := fmt.Sprintf(
+		`UPDATE urls SET is_deleted = TRUE WHERE short_id IN (%s) AND user_id = $%d`,
+		strings.Join(placeholders, ", "),
+		len(shortIDs)+1,
+	)
+	_, err := r.db.ExecContext(ctx, query, args...)
+	return err
 }
 
 func (r *PostgresRepository) GetByOriginalURL(url string) (string, bool) {

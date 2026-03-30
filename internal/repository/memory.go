@@ -7,6 +7,8 @@ type MemoryRepository struct {
 	data     map[string]string
 	reverse  map[string]string   // original_url → short_id
 	userURLs map[string][]string // user_id → []short_id
+	deleted  map[string]bool     // short_id → is_deleted
+	owners   map[string]string   // short_id → user_id
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -14,6 +16,8 @@ func NewMemoryRepository() *MemoryRepository {
 		data:     make(map[string]string),
 		reverse:  make(map[string]string),
 		userURLs: make(map[string][]string),
+		deleted:  make(map[string]bool),
+		owners:   make(map[string]string),
 	}
 }
 
@@ -28,6 +32,7 @@ func (r *MemoryRepository) Save(id, url, userID string) error {
 	}
 	r.data[id] = url
 	r.reverse[url] = id
+	r.owners[id] = userID
 	if userID != "" {
 		r.userURLs[userID] = append(r.userURLs[userID], id)
 	}
@@ -48,6 +53,7 @@ func (r *MemoryRepository) SaveBatch(entries []BatchEntry) error {
 	for _, e := range entries {
 		r.data[e.ID] = e.URL
 		r.reverse[e.URL] = e.ID
+		r.owners[e.ID] = e.UserID
 		if e.UserID != "" {
 			r.userURLs[e.UserID] = append(r.userURLs[e.UserID], e.ID)
 		}
@@ -55,11 +61,28 @@ func (r *MemoryRepository) SaveBatch(entries []BatchEntry) error {
 	return nil
 }
 
-func (r *MemoryRepository) Get(id string) (string, bool) {
+func (r *MemoryRepository) Get(id string) (string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.deleted[id] {
+		return "", ErrDeleted
+	}
 	url, ok := r.data[id]
-	return url, ok
+	if !ok {
+		return "", ErrNotFound
+	}
+	return url, nil
+}
+
+func (r *MemoryRepository) DeleteUserURLs(shortIDs []string, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range shortIDs {
+		if owner, ok := r.owners[id]; ok && owner == userID {
+			r.deleted[id] = true
+		}
+	}
+	return nil
 }
 
 func (r *MemoryRepository) GetByOriginalURL(url string) (string, bool) {

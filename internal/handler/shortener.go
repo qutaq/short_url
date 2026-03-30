@@ -48,6 +48,8 @@ type userURLResponse struct {
 
 func statusFromError(err error) (code int, body string) {
 	switch {
+	case errors.Is(err, service.ErrDeleted):
+		return http.StatusGone, "Gone"
 	case errors.Is(err, service.ErrNotFound):
 		return http.StatusNotFound, "Not Found"
 	case errors.Is(err, service.ErrInvalidInput):
@@ -218,6 +220,29 @@ func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if len(ids) == 0 {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	h.shortener.DeleteUserURLs(ids, userID)
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func PingDB(db *sql.DB) http.HandlerFunc {
