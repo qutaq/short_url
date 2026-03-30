@@ -18,13 +18,13 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-func (r *PostgresRepository) Save(id, url string) error {
+func (r *PostgresRepository) Save(id, url, userID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO urls (short_id, original_url) VALUES ($1, $2)
-		 ON CONFLICT (original_url) DO NOTHING`, id, url)
+		`INSERT INTO urls (short_id, original_url, user_id) VALUES ($1, $2, $3)
+		 ON CONFLICT (original_url) DO NOTHING`, id, url, userID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
@@ -53,7 +53,7 @@ func (r *PostgresRepository) SaveBatch(entries []BatchEntry) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO urls (short_id, original_url) VALUES ($1, $2)
+		`INSERT INTO urls (short_id, original_url, user_id) VALUES ($1, $2, $3)
 		 ON CONFLICT (original_url) DO NOTHING`)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func (r *PostgresRepository) SaveBatch(entries []BatchEntry) error {
 	defer stmt.Close()
 
 	for _, e := range entries {
-		result, err := stmt.ExecContext(ctx, e.ID, e.URL)
+		result, err := stmt.ExecContext(ctx, e.ID, e.URL, e.UserID)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
@@ -104,4 +104,26 @@ func (r *PostgresRepository) GetByOriginalURL(url string) (string, bool) {
 		return "", false
 	}
 	return shortID, true
+}
+
+func (r *PostgresRepository) GetURLsByUser(userID string) ([]URLPair, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT short_id, original_url FROM urls WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pairs []URLPair
+	for rows.Next() {
+		var p URLPair
+		if err := rows.Scan(&p.ShortID, &p.OriginalURL); err != nil {
+			return nil, err
+		}
+		pairs = append(pairs, p)
+	}
+	return pairs, rows.Err()
 }
