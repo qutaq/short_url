@@ -61,7 +61,7 @@ func statusFromError(err error) (code int, body string) {
 
 func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
