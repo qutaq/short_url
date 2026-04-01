@@ -14,7 +14,8 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
 	"github.com/qutaq/short_url/internal/config"
@@ -36,24 +37,26 @@ func main() {
 
 	r := newRouter(logger)
 
-	var db *sql.DB
+	var pool *pgxpool.Pool
 	if cfg.DatabaseDSN != "" {
 		var err error
-		db, err = sql.Open("pgx", cfg.DatabaseDSN)
+		pool, err = pgxpool.New(context.Background(), cfg.DatabaseDSN)
 		if err != nil {
-			log.Fatal("failed to open database:", err)
+			log.Fatal("failed to open database pool:", err)
 		}
-		defer db.Close()
+		defer pool.Close()
 
-		if err := runMigrations(db); err != nil {
+		sqlDB := stdlib.OpenDBFromPool(pool)
+		defer sqlDB.Close()
+		if err := runMigrations(sqlDB); err != nil {
 			log.Fatal("failed to run migrations:", err)
 		}
 	}
 
 	var repo repository.URLRepository
 	switch {
-	case cfg.DatabaseDSN != "" && db != nil:
-		repo = repository.NewPostgresRepository(db)
+	case cfg.DatabaseDSN != "" && pool != nil:
+		repo = repository.NewPostgresRepository(pool)
 	case cfg.FileStoragePath != "":
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
@@ -67,7 +70,7 @@ func main() {
 	shortener := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.NewShortenerHandler(shortener)
 
-	r.Get("/ping", handler.PingDB(db))
+	r.Get("/ping", handler.PingDB(pool))
 	r.Post("/", h.PostShorten)
 	r.Post("/api/shorten", h.PostShortenJSON)
 	r.Post("/api/shorten/batch", h.PostShortenBatch)
