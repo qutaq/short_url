@@ -30,10 +30,7 @@ func main() {
 	}
 	defer logger.Sync()
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestLogger(logger))
-	r.Use(middleware.GzipMiddleware)
-	r.Use(middleware.AuthMiddleware)
+	r := newRouter(logger)
 
 	var db *sql.DB
 	if cfg.DatabaseDSN != "" {
@@ -78,6 +75,14 @@ func main() {
 	if err := http.ListenAndServe(cfg.ServerAddr, r); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func newRouter(logger *zap.Logger) *chi.Mux {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestLogger(logger))
+	r.Use(middleware.GzipMiddleware)
+	r.Use(middleware.AuthMiddleware)
+	return r
 }
 
 func runMigrations(db *sql.DB) error {
