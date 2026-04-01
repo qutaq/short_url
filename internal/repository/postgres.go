@@ -20,8 +20,8 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-func (r *PostgresRepository) Save(id, url, userID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (r *PostgresRepository) Save(ctx context.Context, id, url, userID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := validateUserID(userID); err != nil {
 		return err
@@ -47,8 +47,8 @@ func (r *PostgresRepository) Save(id, url, userID string) error {
 	return nil
 }
 
-func (r *PostgresRepository) SaveBatch(entries []BatchEntry) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (r *PostgresRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for _, e := range entries {
 		if err := validateUserID(e.UserID); err != nil {
@@ -90,8 +90,8 @@ func (r *PostgresRepository) SaveBatch(entries []BatchEntry) error {
 	return tx.Commit()
 }
 
-func (r *PostgresRepository) Get(id string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (r *PostgresRepository) Get(ctx context.Context, id string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	var originalURL string
@@ -99,7 +99,10 @@ func (r *PostgresRepository) Get(id string) (string, error) {
 	err := r.db.QueryRowContext(ctx,
 		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id).Scan(&originalURL, &isDeleted)
 	if err != nil {
-		return "", ErrNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
 	}
 	if isDeleted {
 		return "", ErrDeleted
@@ -107,11 +110,11 @@ func (r *PostgresRepository) Get(id string) (string, error) {
 	return originalURL, nil
 }
 
-func (r *PostgresRepository) DeleteUserURLs(shortIDs []string, userID string) error {
+func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
 	if len(shortIDs) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	placeholders := make([]string, len(shortIDs))
@@ -131,21 +134,24 @@ func (r *PostgresRepository) DeleteUserURLs(shortIDs []string, userID string) er
 	return err
 }
 
-func (r *PostgresRepository) GetByOriginalURL(url string) (string, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (r *PostgresRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	var shortID string
 	err := r.db.QueryRowContext(ctx,
 		`SELECT short_id FROM urls WHERE original_url = $1`, url).Scan(&shortID)
 	if err != nil {
-		return "", false
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
 	}
-	return shortID, true
+	return shortID, true, nil
 }
 
-func (r *PostgresRepository) GetURLsByUser(userID string) ([]URLPair, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	rows, err := r.db.QueryContext(ctx,

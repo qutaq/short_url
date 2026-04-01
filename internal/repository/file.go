@@ -2,6 +2,7 @@ package repository
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -43,7 +44,10 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 	return r, nil
 }
 
-func (r *FileRepository) Save(id, url, userID string) error {
+func (r *FileRepository) Save(ctx context.Context, id, url, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := validateUserID(userID); err != nil {
@@ -76,7 +80,10 @@ func (r *FileRepository) Save(id, url, userID string) error {
 	return nil
 }
 
-func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
+func (r *FileRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -103,7 +110,10 @@ func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
 	return r.flush()
 }
 
-func (r *FileRepository) Get(id string) (string, error) {
+func (r *FileRepository) Get(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.deleted[id] {
@@ -116,7 +126,10 @@ func (r *FileRepository) Get(id string) (string, error) {
 	return url, nil
 }
 
-func (r *FileRepository) DeleteUserURLs(shortIDs []string, userID string) error {
+func (r *FileRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, id := range shortIDs {
@@ -127,14 +140,20 @@ func (r *FileRepository) DeleteUserURLs(shortIDs []string, userID string) error 
 	return nil
 }
 
-func (r *FileRepository) GetByOriginalURL(url string) (string, bool) {
+func (r *FileRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	id, ok := r.reverse[url]
-	return id, ok
+	return id, ok, nil
 }
 
-func (r *FileRepository) GetURLsByUser(userID string) ([]URLPair, error) {
+func (r *FileRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ids := r.userURLs[userID]

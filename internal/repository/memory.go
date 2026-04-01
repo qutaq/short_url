@@ -1,6 +1,9 @@
 package repository
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type MemoryRepository struct {
 	mu       sync.RWMutex
@@ -21,7 +24,10 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) Save(id, url, userID string) error {
+func (r *MemoryRepository) Save(ctx context.Context, id, url, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := validateUserID(userID); err != nil {
@@ -42,7 +48,10 @@ func (r *MemoryRepository) Save(id, url, userID string) error {
 	return nil
 }
 
-func (r *MemoryRepository) SaveBatch(entries []BatchEntry) error {
+func (r *MemoryRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range entries {
@@ -67,7 +76,10 @@ func (r *MemoryRepository) SaveBatch(entries []BatchEntry) error {
 	return nil
 }
 
-func (r *MemoryRepository) Get(id string) (string, error) {
+func (r *MemoryRepository) Get(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.deleted[id] {
@@ -80,7 +92,10 @@ func (r *MemoryRepository) Get(id string) (string, error) {
 	return url, nil
 }
 
-func (r *MemoryRepository) DeleteUserURLs(shortIDs []string, userID string) error {
+func (r *MemoryRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, id := range shortIDs {
@@ -91,14 +106,20 @@ func (r *MemoryRepository) DeleteUserURLs(shortIDs []string, userID string) erro
 	return nil
 }
 
-func (r *MemoryRepository) GetByOriginalURL(url string) (string, bool) {
+func (r *MemoryRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	id, ok := r.reverse[url]
-	return id, ok
+	return id, ok, nil
 }
 
-func (r *MemoryRepository) GetURLsByUser(userID string) ([]URLPair, error) {
+func (r *MemoryRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ids := r.userURLs[userID]
