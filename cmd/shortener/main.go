@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"embed"
 	"errors"
 	"log"
 	"net/http"
@@ -19,10 +18,8 @@ import (
 	"github.com/qutaq/short_url/internal/middleware"
 	"github.com/qutaq/short_url/internal/repository"
 	"github.com/qutaq/short_url/internal/service"
+	dbmigrations "github.com/qutaq/short_url/migrations"
 )
-
-//go:embed migrations/*.sql
-var migrationsFS embed.FS
 
 func main() {
 	cfg := config.Load()
@@ -84,7 +81,7 @@ func main() {
 }
 
 func runMigrations(db *sql.DB) error {
-	source, err := iofs.New(migrationsFS, "migrations")
+	source, err := iofs.New(dbmigrations.FS, ".")
 	if err != nil {
 		return err
 	}
