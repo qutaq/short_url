@@ -46,6 +46,9 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 func (r *FileRepository) Save(id, url, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := validateUserID(userID); err != nil {
+		return err
+	}
 
 	if _, exists := r.reverse[url]; exists {
 		return ErrURLExists
@@ -78,6 +81,9 @@ func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
 	defer r.mu.Unlock()
 
 	for _, e := range entries {
+		if err := validateUserID(e.UserID); err != nil {
+			return err
+		}
 		if _, exists := r.reverse[e.URL]; exists {
 			return ErrURLExists
 		}

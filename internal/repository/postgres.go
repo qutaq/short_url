@@ -23,6 +23,9 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 func (r *PostgresRepository) Save(id, url, userID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if err := validateUserID(userID); err != nil {
+		return err
+	}
 
 	result, err := r.db.ExecContext(ctx,
 		`INSERT INTO urls (short_id, original_url, user_id) VALUES ($1, $2, $3)
@@ -47,6 +50,11 @@ func (r *PostgresRepository) Save(id, url, userID string) error {
 func (r *PostgresRepository) SaveBatch(entries []BatchEntry) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	for _, e := range entries {
+		if err := validateUserID(e.UserID); err != nil {
+			return err
+		}
+	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
