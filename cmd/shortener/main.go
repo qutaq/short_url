@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-migrate/migrate/v4"
@@ -71,9 +75,27 @@ func main() {
 	r.Delete("/api/user/urls", h.DeleteUserURLs)
 	r.Get("/{id}", h.GetRedirect)
 
-	log.Println("Server starting at", cfg.ServerAddr)
-	if err := http.ListenAndServe(cfg.ServerAddr, r); err != nil {
-		log.Fatal(err)
+	log.Printf("Server starting at %s", cfg.ServerAddr)
+
+	srv := &http.Server{
+		Addr:    cfg.ServerAddr,
+		Handler: r,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown: %v", err)
 	}
 }
 
