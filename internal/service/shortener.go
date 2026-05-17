@@ -28,9 +28,9 @@ type deleteTask struct {
 }
 
 type Shortener struct {
-	repo    repository.URLRepository
-	baseURL string
-	delCh   chan deleteTask
+	repo           repository.URLRepository
+	shortURLPrefix string
+	delCh          chan deleteTask
 }
 type BatchInput struct {
 	CorrelationID string
@@ -49,9 +49,9 @@ type UserURLOutput struct {
 
 func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 	s := &Shortener{
-		repo:    repo,
-		baseURL: baseURL,
-		delCh:   make(chan deleteTask, 1024),
+		repo:           repo,
+		shortURLPrefix: baseURL + "/",
+		delCh:          make(chan deleteTask, 1024),
 	}
 	go s.runDeleteWorker()
 	return s
@@ -68,7 +68,7 @@ func (s *Shortener) Shorten(ctx context.Context, url, userID string) (string, er
 	for range maxSaveRetries {
 		err = s.repo.Save(ctx, id, url, userID)
 		if err == nil {
-			return s.baseURL + "/" + id, nil
+			return s.makeShortURL(id), nil
 		}
 		if errors.Is(err, repository.ErrURLExists) {
 			return s.findExistingShortURL(ctx, url)
@@ -92,7 +92,7 @@ func (s *Shortener) findExistingShortURL(ctx context.Context, url string) (strin
 	if !ok {
 		return "", fmt.Errorf("original url conflict but record not found")
 	}
-	return s.baseURL + "/" + existingID, ErrURLConflict
+	return s.makeShortURL(existingID), ErrURLConflict
 }
 
 func (s *Shortener) ShortenBatch(ctx context.Context, items []BatchInput, userID string) ([]BatchOutput, error) {
@@ -116,7 +116,7 @@ func (s *Shortener) ShortenBatch(ctx context.Context, items []BatchInput, userID
 		entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL, UserID: userID}
 		results[i] = BatchOutput{
 			CorrelationID: item.CorrelationID,
-			ShortURL:      s.baseURL + "/" + id,
+			ShortURL:      s.makeShortURL(id),
 		}
 	}
 
@@ -140,7 +140,7 @@ func (s *Shortener) ShortenBatch(ctx context.Context, items []BatchInput, userID
 				return nil, err
 			}
 			entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL, UserID: userID}
-			results[i].ShortURL = s.baseURL + "/" + id
+			results[i].ShortURL = s.makeShortURL(id)
 		}
 	}
 	return nil, fmt.Errorf("failed to save batch after %d retries: %w", maxSaveRetries, repository.ErrConflict)
@@ -152,7 +152,7 @@ func (s *Shortener) shortenBatchOneByOne(ctx context.Context, entries []reposito
 		for attempt := 0; attempt < maxSaveRetries && !saved; attempt++ {
 			err := s.repo.Save(ctx, entries[i].ID, entries[i].URL, entries[i].UserID)
 			if err == nil {
-				results[i].ShortURL = s.baseURL + "/" + entries[i].ID
+				results[i].ShortURL = s.makeShortURL(entries[i].ID)
 				saved = true
 				break
 			}
@@ -164,7 +164,7 @@ func (s *Shortener) shortenBatchOneByOne(ctx context.Context, entries []reposito
 				if !ok {
 					return nil, fmt.Errorf("original url exists but record not found")
 				}
-				results[i].ShortURL = s.baseURL + "/" + existingID
+				results[i].ShortURL = s.makeShortURL(existingID)
 				saved = true
 				break
 			}
@@ -264,21 +264,25 @@ func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]UserURLOu
 	result := make([]UserURLOutput, len(pairs))
 	for i, p := range pairs {
 		result[i] = UserURLOutput{
-			ShortURL:    s.baseURL + "/" + p.ShortID,
+			ShortURL:    s.makeShortURL(p.ShortID),
 			OriginalURL: p.OriginalURL,
 		}
 	}
 	return result, nil
 }
 
+func (s *Shortener) makeShortURL(id string) string {
+	return s.shortURLPrefix + id
+}
+
 func (s *Shortener) generateUniqueID() (string, error) {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, shortIDLen)
-	if _, err := rand.Read(b); err != nil {
+	var b [shortIDLen]byte
+	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generate id: %w", err)
 	}
 	for i := range b {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
-	return string(b), nil
+	return string(b[:]), nil
 }

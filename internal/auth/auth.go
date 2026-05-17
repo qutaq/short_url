@@ -17,6 +17,7 @@ const userIDKey contextKey = "user_id"
 var secretKey = []byte("short-url-secret-key-2024")
 
 const userIDLen = 16
+const tokenLen = userIDLen*2 + sha256.Size*2
 
 var (
 	ErrInvalidToken = errors.New("invalid auth token")
@@ -34,27 +35,33 @@ func GenerateUserID() (string, error) {
 func SignUserID(userID string) string {
 	mac := hmac.New(sha256.New, secretKey)
 	mac.Write([]byte(userID))
-	signature := mac.Sum(nil)
-	return userID + hex.EncodeToString(signature)
+
+	var digest [sha256.Size]byte
+	signature := mac.Sum(digest[:0])
+	token := make([]byte, len(userID)+hex.EncodedLen(len(signature)))
+	copy(token, userID)
+	hex.Encode(token[len(userID):], signature)
+	return string(token)
 }
 
 func VerifyToken(token string) (string, error) {
-	if len(token) < userIDLen*2+sha256.Size*2 {
+	if len(token) != tokenLen {
 		return "", ErrInvalidToken
 	}
 	userID := token[:userIDLen*2]
 	sigHex := token[userIDLen*2:]
 
-	sig, err := hex.DecodeString(sigHex)
-	if err != nil {
+	var sig [sha256.Size]byte
+	if _, err := hex.Decode(sig[:], []byte(sigHex)); err != nil {
 		return "", ErrInvalidToken
 	}
 
 	mac := hmac.New(sha256.New, secretKey)
 	mac.Write([]byte(userID))
-	expected := mac.Sum(nil)
+	var digest [sha256.Size]byte
+	expected := mac.Sum(digest[:0])
 
-	if !hmac.Equal(sig, expected) {
+	if !hmac.Equal(sig[:], expected) {
 		return "", ErrInvalidToken
 	}
 	return userID, nil
