@@ -164,6 +164,15 @@ func runMigrations(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		sourceErr, databaseErr := m.Close()
+		if sourceErr != nil {
+			log.Printf("failed to close migration source: %v", sourceErr)
+		}
+		if databaseErr != nil {
+			log.Printf("failed to close migration database: %v", databaseErr)
+		}
+	}()
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return err
 	}
