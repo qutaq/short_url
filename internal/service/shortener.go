@@ -33,11 +33,16 @@ type BatchOutput struct {
 	ShortURL      string
 }
 
+type UserURLOutput struct {
+	ShortURL    string
+	OriginalURL string
+}
+
 func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 	return &Shortener{repo: repo, baseURL: baseURL}
 }
 
-func (s *Shortener) Shorten(url string) (string, error) {
+func (s *Shortener) Shorten(url, userID string) (string, error) {
 	if url == "" {
 		return "", ErrInvalidInput
 	}
@@ -46,7 +51,7 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		return "", err
 	}
 	for range maxSaveRetries {
-		err = s.repo.Save(id, url)
+		err = s.repo.Save(id, url, userID)
 		if err == nil {
 			return s.baseURL + "/" + id, nil
 		}
@@ -72,7 +77,7 @@ func (s *Shortener) findExistingShortURL(url string) (string, error) {
 	return s.baseURL + "/" + existingID, ErrURLConflict
 }
 
-func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
+func (s *Shortener) ShortenBatch(items []BatchInput, userID string) ([]BatchOutput, error) {
 	if len(items) == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -90,7 +95,7 @@ func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL}
+		entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL, UserID: userID}
 		results[i] = BatchOutput{
 			CorrelationID: item.CorrelationID,
 			ShortURL:      s.baseURL + "/" + id,
@@ -116,7 +121,7 @@ func (s *Shortener) ShortenBatch(items []BatchInput) ([]BatchOutput, error) {
 			if err != nil {
 				return nil, err
 			}
-			entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL}
+			entries[i] = repository.BatchEntry{ID: id, URL: item.OriginalURL, UserID: userID}
 			results[i].ShortURL = s.baseURL + "/" + id
 		}
 	}
@@ -127,7 +132,7 @@ func (s *Shortener) shortenBatchOneByOne(entries []repository.BatchEntry, result
 	for i := range entries {
 		saved := false
 		for attempt := 0; attempt < maxSaveRetries && !saved; attempt++ {
-			err := s.repo.Save(entries[i].ID, entries[i].URL)
+			err := s.repo.Save(entries[i].ID, entries[i].URL, entries[i].UserID)
 			if err == nil {
 				results[i].ShortURL = s.baseURL + "/" + entries[i].ID
 				saved = true
@@ -165,6 +170,24 @@ func (s *Shortener) GetOriginal(id string) (string, error) {
 		return "", ErrNotFound
 	}
 	return url, nil
+}
+
+func (s *Shortener) GetUserURLs(userID string) ([]UserURLOutput, error) {
+	pairs, err := s.repo.GetURLsByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	result := make([]UserURLOutput, len(pairs))
+	for i, p := range pairs {
+		result[i] = UserURLOutput{
+			ShortURL:    s.baseURL + "/" + p.ShortID,
+			OriginalURL: p.OriginalURL,
+		}
+	}
+	return result, nil
 }
 
 func (s *Shortener) generateUniqueID() (string, error) {

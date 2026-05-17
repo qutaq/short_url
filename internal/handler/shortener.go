@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/qutaq/short_url/internal/auth"
 	"github.com/qutaq/short_url/internal/service"
 )
 
@@ -40,6 +41,11 @@ type batchResponse struct {
 	ShortURL      string `json:"short_url"`
 }
 
+type userURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
 func statusFromError(err error) (code int, body string) {
 	switch {
 	case errors.Is(err, service.ErrNotFound):
@@ -67,7 +73,10 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	shortURL, err := h.shortener.Shorten(rawURL)
+
+	userID, _ := auth.UserIDFromContext(r.Context())
+
+	shortURL, err := h.shortener.Shorten(rawURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLConflict) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -114,7 +123,9 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	shortURL, err := h.shortener.Shorten(rawURL)
+	userID, _ := auth.UserIDFromContext(r.Context())
+
+	shortURL, err := h.shortener.Shorten(rawURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLConflict) {
 			w.Header().Set("Content-Type", "application/json")
@@ -158,7 +169,9 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	results, err := h.shortener.ShortenBatch(items)
+	userID, _ := auth.UserIDFromContext(r.Context())
+
+	results, err := h.shortener.ShortenBatch(items, userID)
 	if err != nil {
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
@@ -175,6 +188,35 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	urls, err := h.shortener.GetUserURLs(userID)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	if len(urls) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	resp := make([]userURLResponse, len(urls))
+	for i, u := range urls {
+		resp[i] = userURLResponse{
+			ShortURL:    u.ShortURL,
+			OriginalURL: u.OriginalURL,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 

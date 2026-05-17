@@ -36,6 +36,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.GzipMiddleware)
+	r.Use(middleware.AuthMiddleware)
 
 	var db *sql.DB
 	if cfg.DatabaseDSN != "" {
@@ -72,6 +73,7 @@ func main() {
 	r.Post("/", h.PostShorten)
 	r.Post("/api/shorten", h.PostShortenJSON)
 	r.Post("/api/shorten/batch", h.PostShortenBatch)
+	r.Get("/api/user/urls", h.GetUserURLs)
 	r.Get("/{id}", h.GetRedirect)
 
 	log.Println("Server starting at", cfg.ServerAddr)
