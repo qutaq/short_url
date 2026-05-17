@@ -2,6 +2,7 @@ package repository
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -21,6 +22,8 @@ type FileRepository struct {
 	data     map[string]string
 	reverse  map[string]string   // original_url → short_id
 	userURLs map[string][]string // user_id → []short_id
+	deleted  map[string]bool     // short_id → is_deleted
+	owners   map[string]string   // short_id → user_id
 	filePath string
 	nextUUID int
 }
@@ -30,6 +33,8 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 		data:     make(map[string]string),
 		reverse:  make(map[string]string),
 		userURLs: make(map[string][]string),
+		deleted:  make(map[string]bool),
+		owners:   make(map[string]string),
 		filePath: filePath,
 		nextUUID: 1,
 	}
@@ -39,9 +44,15 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 	return r, nil
 }
 
-func (r *FileRepository) Save(id, url, userID string) error {
+func (r *FileRepository) Save(ctx context.Context, id, url, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := validateUserID(userID); err != nil {
+		return err
+	}
 
 	if _, exists := r.reverse[url]; exists {
 		return ErrURLExists
@@ -61,6 +72,7 @@ func (r *FileRepository) Save(id, url, userID string) error {
 	}
 	r.data[id] = url
 	r.reverse[url] = id
+	r.owners[id] = userID
 	if userID != "" {
 		r.userURLs[userID] = append(r.userURLs[userID], id)
 	}
@@ -68,11 +80,17 @@ func (r *FileRepository) Save(id, url, userID string) error {
 	return nil
 }
 
-func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
+func (r *FileRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	for _, e := range entries {
+		if err := validateUserID(e.UserID); err != nil {
+			return err
+		}
 		if _, exists := r.reverse[e.URL]; exists {
 			return ErrURLExists
 		}
@@ -83,6 +101,7 @@ func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
 	for _, e := range entries {
 		r.data[e.ID] = e.URL
 		r.reverse[e.URL] = e.ID
+		r.owners[e.ID] = e.UserID
 		if e.UserID != "" {
 			r.userURLs[e.UserID] = append(r.userURLs[e.UserID], e.ID)
 		}
@@ -91,21 +110,50 @@ func (r *FileRepository) SaveBatch(entries []BatchEntry) error {
 	return r.flush()
 }
 
-func (r *FileRepository) Get(id string) (string, bool) {
+func (r *FileRepository) Get(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.deleted[id] {
+		return "", ErrDeleted
+	}
 	url, ok := r.data[id]
-	return url, ok
+	if !ok {
+		return "", ErrNotFound
+	}
+	return url, nil
 }
 
-func (r *FileRepository) GetByOriginalURL(url string) (string, bool) {
+func (r *FileRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range shortIDs {
+		if owner, ok := r.owners[id]; ok && owner == userID {
+			r.deleted[id] = true
+		}
+	}
+	return nil
+}
+
+func (r *FileRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	id, ok := r.reverse[url]
-	return id, ok
+	return id, ok, nil
 }
 
-func (r *FileRepository) GetURLsByUser(userID string) ([]URLPair, error) {
+func (r *FileRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	ids := r.userURLs[userID]

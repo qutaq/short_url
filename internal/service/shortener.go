@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/qutaq/short_url/internal/repository"
 )
@@ -17,11 +19,18 @@ var (
 	ErrNotFound     = errors.New("url not found")
 	ErrInvalidInput = errors.New("invalid input")
 	ErrURLConflict  = errors.New("original url already exists")
+	ErrDeleted      = errors.New("url has been deleted")
 )
+
+type deleteTask struct {
+	shortID string
+	userID  string
+}
 
 type Shortener struct {
 	repo    repository.URLRepository
 	baseURL string
+	delCh   chan deleteTask
 }
 type BatchInput struct {
 	CorrelationID string
@@ -39,10 +48,16 @@ type UserURLOutput struct {
 }
 
 func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
-	return &Shortener{repo: repo, baseURL: baseURL}
+	s := &Shortener{
+		repo:    repo,
+		baseURL: baseURL,
+		delCh:   make(chan deleteTask, 1024),
+	}
+	go s.runDeleteWorker()
+	return s
 }
 
-func (s *Shortener) Shorten(url, userID string) (string, error) {
+func (s *Shortener) Shorten(ctx context.Context, url, userID string) (string, error) {
 	if url == "" {
 		return "", ErrInvalidInput
 	}
@@ -51,12 +66,12 @@ func (s *Shortener) Shorten(url, userID string) (string, error) {
 		return "", err
 	}
 	for range maxSaveRetries {
-		err = s.repo.Save(id, url, userID)
+		err = s.repo.Save(ctx, id, url, userID)
 		if err == nil {
 			return s.baseURL + "/" + id, nil
 		}
 		if errors.Is(err, repository.ErrURLExists) {
-			return s.findExistingShortURL(url)
+			return s.findExistingShortURL(ctx, url)
 		}
 		if !errors.Is(err, repository.ErrConflict) {
 			return "", err
@@ -69,15 +84,18 @@ func (s *Shortener) Shorten(url, userID string) (string, error) {
 	return "", fmt.Errorf("failed to save after %d retries: %w", maxSaveRetries, repository.ErrConflict)
 }
 
-func (s *Shortener) findExistingShortURL(url string) (string, error) {
-	existingID, ok := s.repo.GetByOriginalURL(url)
+func (s *Shortener) findExistingShortURL(ctx context.Context, url string) (string, error) {
+	existingID, ok, err := s.repo.GetByOriginalURL(ctx, url)
+	if err != nil {
+		return "", err
+	}
 	if !ok {
 		return "", fmt.Errorf("original url conflict but record not found")
 	}
 	return s.baseURL + "/" + existingID, ErrURLConflict
 }
 
-func (s *Shortener) ShortenBatch(items []BatchInput, userID string) ([]BatchOutput, error) {
+func (s *Shortener) ShortenBatch(ctx context.Context, items []BatchInput, userID string) ([]BatchOutput, error) {
 	if len(items) == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -103,12 +121,12 @@ func (s *Shortener) ShortenBatch(items []BatchInput, userID string) ([]BatchOutp
 	}
 
 	for attempt := range maxSaveRetries {
-		err := s.repo.SaveBatch(entries)
+		err := s.repo.SaveBatch(ctx, entries)
 		if err == nil {
 			return results, nil
 		}
 		if errors.Is(err, repository.ErrURLExists) {
-			return s.shortenBatchOneByOne(entries, results)
+			return s.shortenBatchOneByOne(ctx, entries, results)
 		}
 		if !errors.Is(err, repository.ErrConflict) {
 			return nil, err
@@ -128,18 +146,21 @@ func (s *Shortener) ShortenBatch(items []BatchInput, userID string) ([]BatchOutp
 	return nil, fmt.Errorf("failed to save batch after %d retries: %w", maxSaveRetries, repository.ErrConflict)
 }
 
-func (s *Shortener) shortenBatchOneByOne(entries []repository.BatchEntry, results []BatchOutput) ([]BatchOutput, error) {
+func (s *Shortener) shortenBatchOneByOne(ctx context.Context, entries []repository.BatchEntry, results []BatchOutput) ([]BatchOutput, error) {
 	for i := range entries {
 		saved := false
 		for attempt := 0; attempt < maxSaveRetries && !saved; attempt++ {
-			err := s.repo.Save(entries[i].ID, entries[i].URL, entries[i].UserID)
+			err := s.repo.Save(ctx, entries[i].ID, entries[i].URL, entries[i].UserID)
 			if err == nil {
 				results[i].ShortURL = s.baseURL + "/" + entries[i].ID
 				saved = true
 				break
 			}
 			if errors.Is(err, repository.ErrURLExists) {
-				existingID, ok := s.repo.GetByOriginalURL(entries[i].URL)
+				existingID, ok, errLookup := s.repo.GetByOriginalURL(ctx, entries[i].URL)
+				if errLookup != nil {
+					return nil, errLookup
+				}
 				if !ok {
 					return nil, fmt.Errorf("original url exists but record not found")
 				}
@@ -164,16 +185,76 @@ func (s *Shortener) shortenBatchOneByOne(entries []repository.BatchEntry, result
 	return results, nil
 }
 
-func (s *Shortener) GetOriginal(id string) (string, error) {
-	url, ok := s.repo.Get(id)
-	if !ok {
+func (s *Shortener) GetOriginal(ctx context.Context, id string) (string, error) {
+	url, err := s.repo.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrDeleted) {
+			return "", ErrDeleted
+		}
 		return "", ErrNotFound
 	}
 	return url, nil
 }
 
-func (s *Shortener) GetUserURLs(userID string) ([]UserURLOutput, error) {
-	pairs, err := s.repo.GetURLsByUser(userID)
+func (s *Shortener) DeleteUserURLs(shortIDs []string, userID string) {
+	inputCh := generateDeleteTasks(shortIDs, userID)
+	go func() {
+		for task := range inputCh {
+			s.delCh <- task
+		}
+	}()
+}
+
+func generateDeleteTasks(shortIDs []string, userID string) <-chan deleteTask {
+	ch := make(chan deleteTask)
+	go func() {
+		defer close(ch)
+		for _, id := range shortIDs {
+			ch <- deleteTask{shortID: id, userID: userID}
+		}
+	}()
+	return ch
+}
+
+func (s *Shortener) runDeleteWorker() {
+	const (
+		batchSize    = 100
+		flushTimeout = 5 * time.Second
+	)
+	ticker := time.NewTicker(flushTimeout)
+	defer ticker.Stop()
+
+	buf := make([]deleteTask, 0, batchSize)
+
+	for {
+		select {
+		case task := <-s.delCh:
+			buf = append(buf, task)
+			if len(buf) >= batchSize {
+				s.flushDeleteBatch(buf)
+				buf = make([]deleteTask, 0, batchSize)
+			}
+		case <-ticker.C:
+			if len(buf) > 0 {
+				s.flushDeleteBatch(buf)
+				buf = make([]deleteTask, 0, batchSize)
+			}
+		}
+	}
+}
+
+func (s *Shortener) flushDeleteBatch(tasks []deleteTask) {
+	byUser := make(map[string][]string)
+	for _, t := range tasks {
+		byUser[t.userID] = append(byUser[t.userID], t.shortID)
+	}
+	for userID, ids := range byUser {
+		_ = s.repo.DeleteUserURLs(context.Background(), ids, userID)
+	}
+}
+
+func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]UserURLOutput, error) {
+	pairs, err := s.repo.GetURLsByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

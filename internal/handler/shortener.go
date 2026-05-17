@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qutaq/short_url/internal/auth"
 	"github.com/qutaq/short_url/internal/service"
@@ -48,6 +48,8 @@ type userURLResponse struct {
 
 func statusFromError(err error) (code int, body string) {
 	switch {
+	case errors.Is(err, service.ErrDeleted):
+		return http.StatusGone, "Gone"
 	case errors.Is(err, service.ErrNotFound):
 		return http.StatusNotFound, "Not Found"
 	case errors.Is(err, service.ErrInvalidInput):
@@ -59,7 +61,7 @@ func statusFromError(err error) (code int, body string) {
 
 func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
@@ -76,7 +78,7 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 
 	userID, _ := auth.UserIDFromContext(r.Context())
 
-	shortURL, err := h.shortener.Shorten(rawURL, userID)
+	shortURL, err := h.shortener.Shorten(r.Context(), rawURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLConflict) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -99,7 +101,7 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	originalURL, err := h.shortener.GetOriginal(id)
+	originalURL, err := h.shortener.GetOriginal(r.Context(), id)
 	if err != nil {
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
@@ -125,7 +127,7 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 
 	userID, _ := auth.UserIDFromContext(r.Context())
 
-	shortURL, err := h.shortener.Shorten(rawURL, userID)
+	shortURL, err := h.shortener.Shorten(r.Context(), rawURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLConflict) {
 			w.Header().Set("Content-Type", "application/json")
@@ -171,7 +173,7 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 
 	userID, _ := auth.UserIDFromContext(r.Context())
 
-	results, err := h.shortener.ShortenBatch(items, userID)
+	results, err := h.shortener.ShortenBatch(r.Context(), items, userID)
 	if err != nil {
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
@@ -198,7 +200,7 @@ func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	urls, err := h.shortener.GetUserURLs(userID)
+	urls, err := h.shortener.GetUserURLs(r.Context(), userID)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -220,13 +222,36 @@ func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func PingDB(db *sql.DB) http.HandlerFunc {
+func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if len(ids) == 0 {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	h.shortener.DeleteUserURLs(ids, userID)
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func PingDB(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if db == nil {
+		if pool == nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		if err := db.PingContext(r.Context()); err != nil {
+		if err := pool.Ping(r.Context()); err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}

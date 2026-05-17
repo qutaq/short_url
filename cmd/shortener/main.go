@@ -1,17 +1,21 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"embed"
 	"errors"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
 	"github.com/qutaq/short_url/internal/config"
@@ -19,10 +23,8 @@ import (
 	"github.com/qutaq/short_url/internal/middleware"
 	"github.com/qutaq/short_url/internal/repository"
 	"github.com/qutaq/short_url/internal/service"
+	dbmigrations "github.com/qutaq/short_url/migrations"
 )
-
-//go:embed migrations/*.sql
-var migrationsFS embed.FS
 
 func main() {
 	cfg := config.Load()
@@ -33,29 +35,28 @@ func main() {
 	}
 	defer logger.Sync()
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestLogger(logger))
-	r.Use(middleware.GzipMiddleware)
-	r.Use(middleware.AuthMiddleware)
+	r := newRouter(logger)
 
-	var db *sql.DB
+	var pool *pgxpool.Pool
 	if cfg.DatabaseDSN != "" {
 		var err error
-		db, err = sql.Open("pgx", cfg.DatabaseDSN)
+		pool, err = pgxpool.New(context.Background(), cfg.DatabaseDSN)
 		if err != nil {
-			log.Fatal("failed to open database:", err)
+			log.Fatal("failed to open database pool:", err)
 		}
-		defer db.Close()
+		defer pool.Close()
 
-		if err := runMigrations(db); err != nil {
+		sqlDB := stdlib.OpenDBFromPool(pool)
+		defer sqlDB.Close()
+		if err := runMigrations(sqlDB); err != nil {
 			log.Fatal("failed to run migrations:", err)
 		}
 	}
 
 	var repo repository.URLRepository
 	switch {
-	case cfg.DatabaseDSN != "" && db != nil:
-		repo = repository.NewPostgresRepository(db)
+	case cfg.DatabaseDSN != "" && pool != nil:
+		repo = repository.NewPostgresRepository(pool)
 	case cfg.FileStoragePath != "":
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
@@ -69,21 +70,48 @@ func main() {
 	shortener := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.NewShortenerHandler(shortener)
 
-	r.Get("/ping", handler.PingDB(db))
+	r.Get("/ping", handler.PingDB(pool))
 	r.Post("/", h.PostShorten)
 	r.Post("/api/shorten", h.PostShortenJSON)
 	r.Post("/api/shorten/batch", h.PostShortenBatch)
 	r.Get("/api/user/urls", h.GetUserURLs)
+	r.Delete("/api/user/urls", h.DeleteUserURLs)
 	r.Get("/{id}", h.GetRedirect)
 
-	log.Println("Server starting at", cfg.ServerAddr)
-	if err := http.ListenAndServe(cfg.ServerAddr, r); err != nil {
-		log.Fatal(err)
+	log.Printf("Server starting at %s", cfg.ServerAddr)
+
+	srv := &http.Server{
+		Addr:    cfg.ServerAddr,
+		Handler: r,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown: %v", err)
 	}
 }
 
+func newRouter(logger *zap.Logger) *chi.Mux {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestLogger(logger))
+	r.Use(middleware.GzipMiddleware)
+	r.Use(middleware.AuthMiddleware)
+	return r
+}
+
 func runMigrations(db *sql.DB) error {
-	source, err := iofs.New(migrationsFS, "migrations")
+	source, err := iofs.New(dbmigrations.FS, ".")
 	if err != nil {
 		return err
 	}
