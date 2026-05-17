@@ -15,17 +15,25 @@ import (
 )
 
 const (
+	// ActionShorten идентифицирует события аудита после сокращения URL.
 	ActionShorten = "shorten"
-	ActionFollow  = "follow"
+	// ActionFollow идентифицирует события аудита после переходов по коротким ссылкам.
+	ActionFollow = "follow"
 )
 
+// Event описывает одно аудируемое действие пользователя.
 type Event struct {
-	Timestamp int64  `json:"ts"`
-	Action    string `json:"action"`
-	UserID    string `json:"user_id,omitempty"`
-	URL       string `json:"url"`
+	// Timestamp содержит Unix-время создания события.
+	Timestamp int64 `json:"ts"`
+	// Action содержит тип события.
+	Action string `json:"action"`
+	// UserID идентифицирует пользователя, связанного с событием.
+	UserID string `json:"user_id,omitempty"`
+	// URL содержит URL, которого касается событие.
+	URL string `json:"url"`
 }
 
+// NewEvent создаёт Event с текущим Unix-временем.
 func NewEvent(action, userID, url string) Event {
 	return Event{
 		Timestamp: time.Now().Unix(),
@@ -35,18 +43,23 @@ func NewEvent(action, userID, url string) Event {
 	}
 }
 
+// Observer получает события аудита.
 type Observer interface {
+	// Notify обрабатывает одно событие аудита.
 	Notify(ctx context.Context, event Event) error
 }
 
+// Notifier передаёт события аудита одному или нескольким наблюдателям.
 type Notifier struct {
 	observers []Observer
 }
 
+// NewNotifier создаёт Notifier для переданных наблюдателей.
 func NewNotifier(observers ...Observer) *Notifier {
 	return &Notifier{observers: observers}
 }
 
+// Notify отправляет событие каждому настроенному наблюдателю и объединяет ошибки.
 func (n *Notifier) Notify(ctx context.Context, event Event) error {
 	if n == nil {
 		return nil
@@ -59,11 +72,13 @@ func (n *Notifier) Notify(ctx context.Context, event Event) error {
 	return err
 }
 
+// FileObserver записывает события аудита в файл в формате JSON Lines.
 type FileObserver struct {
 	mu   sync.Mutex
 	file *os.File
 }
 
+// NewFileObserver открывает файл по указанному пути для добавления событий аудита.
 func NewFileObserver(path string) (*FileObserver, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -72,6 +87,7 @@ func NewFileObserver(path string) (*FileObserver, error) {
 	return &FileObserver{file: file}, nil
 }
 
+// Notify записывает событие в файл аудита.
 func (o *FileObserver) Notify(ctx context.Context, event Event) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -91,6 +107,7 @@ func (o *FileObserver) Notify(ctx context.Context, event Event) error {
 	return nil
 }
 
+// Close закрывает нижележащий файл аудита.
 func (o *FileObserver) Close() error {
 	if o == nil {
 		return nil
@@ -98,11 +115,13 @@ func (o *FileObserver) Close() error {
 	return o.file.Close()
 }
 
+// RemoteObserver отправляет события аудита на удалённую HTTP-точку приёма.
 type RemoteObserver struct {
 	url    string
 	client *http.Client
 }
 
+// NewRemoteObserver создаёт RemoteObserver для указанного URL.
 func NewRemoteObserver(rawURL string) (*RemoteObserver, error) {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
@@ -117,6 +136,7 @@ func NewRemoteObserver(rawURL string) (*RemoteObserver, error) {
 	}, nil
 }
 
+// Notify отправляет событие на удалённую точку приёма аудита в формате JSON.
 func (o *RemoteObserver) Notify(ctx context.Context, event Event) error {
 	data, err := json.Marshal(event)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// MemoryRepository хранит записи URL в памяти процесса.
 type MemoryRepository struct {
 	mu       sync.RWMutex
 	data     map[string]string
@@ -14,6 +15,7 @@ type MemoryRepository struct {
 	owners   map[string]string   // short_id → user_id
 }
 
+// NewMemoryRepository создаёт пустой репозиторий URL в памяти.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		data:     make(map[string]string),
@@ -24,6 +26,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
+// Save сохраняет одну запись короткой ссылки в памяти.
 func (r *MemoryRepository) Save(ctx context.Context, id, url, userID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -48,6 +51,7 @@ func (r *MemoryRepository) Save(ctx context.Context, id, url, userID string) err
 	return nil
 }
 
+// SaveBatch сохраняет несколько записей коротких ссылок в памяти.
 func (r *MemoryRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -76,6 +80,7 @@ func (r *MemoryRepository) SaveBatch(ctx context.Context, entries []BatchEntry) 
 	return nil
 }
 
+// Get возвращает исходный URL по идентификатору короткой ссылки.
 func (r *MemoryRepository) Get(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -92,6 +97,7 @@ func (r *MemoryRepository) Get(ctx context.Context, id string) (string, error) {
 	return url, nil
 }
 
+// DeleteUserURLs помечает URL, принадлежащие userID, как удалённые.
 func (r *MemoryRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -106,6 +112,7 @@ func (r *MemoryRepository) DeleteUserURLs(ctx context.Context, shortIDs []string
 	return nil
 }
 
+// GetByOriginalURL ищет идентификатор короткой ссылки по исходному URL.
 func (r *MemoryRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, err
@@ -116,6 +123,7 @@ func (r *MemoryRepository) GetByOriginalURL(ctx context.Context, url string) (st
 	return id, ok, nil
 }
 
+// GetURLsByUser возвращает записи URL, созданные userID.
 func (r *MemoryRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

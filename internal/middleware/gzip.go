@@ -68,6 +68,8 @@ func (w *gzipResponseWriter) Close() error {
 	return nil
 }
 
+// GzipMiddleware распаковывает gzip-тела запросов и сжимает подходящие ответы,
+// если клиент поддерживает gzip.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Encoding") == "gzip" {

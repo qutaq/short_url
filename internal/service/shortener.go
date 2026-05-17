@@ -16,10 +16,14 @@ const (
 )
 
 var (
-	ErrNotFound     = errors.New("url not found")
+	// ErrNotFound сообщает, что идентификатор короткой ссылки не найден.
+	ErrNotFound = errors.New("url not found")
+	// ErrInvalidInput сообщает, что в сервис переданы некорректные данные.
 	ErrInvalidInput = errors.New("invalid input")
-	ErrURLConflict  = errors.New("original url already exists")
-	ErrDeleted      = errors.New("url has been deleted")
+	// ErrURLConflict сообщает, что исходный URL уже был сокращён.
+	ErrURLConflict = errors.New("original url already exists")
+	// ErrDeleted сообщает, что короткая ссылка была удалена владельцем.
+	ErrDeleted = errors.New("url has been deleted")
 )
 
 type deleteTask struct {
@@ -27,26 +31,39 @@ type deleteTask struct {
 	userID  string
 }
 
+// Shortener координирует операции сокращения URL через репозиторий.
 type Shortener struct {
 	repo           repository.URLRepository
 	shortURLPrefix string
 	delCh          chan deleteTask
 }
+
+// BatchInput описывает один URL в пакетном запросе на сокращение.
 type BatchInput struct {
+	// CorrelationID идентифицирует элемент в клиентском запросе.
 	CorrelationID string
-	OriginalURL   string
-}
-
-type BatchOutput struct {
-	CorrelationID string
-	ShortURL      string
-}
-
-type UserURLOutput struct {
-	ShortURL    string
+	// OriginalURL содержит URL, который нужно сократить.
 	OriginalURL string
 }
 
+// BatchOutput описывает один сокращённый URL в пакетном ответе.
+type BatchOutput struct {
+	// CorrelationID повторяет идентификатор соответствующего элемента запроса.
+	CorrelationID string
+	// ShortURL содержит сгенерированный абсолютный короткий URL.
+	ShortURL string
+}
+
+// UserURLOutput описывает короткую ссылку, принадлежащую пользователю.
+type UserURLOutput struct {
+	// ShortURL содержит абсолютный короткий URL.
+	ShortURL string
+	// OriginalURL содержит исходный URL, связанный с ShortURL.
+	OriginalURL string
+}
+
+// NewShortener создаёт Shortener, который строит ссылки с базовым URL baseURL
+// и сохраняет данные через repo.
 func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 	s := &Shortener{
 		repo:           repo,
@@ -57,6 +74,9 @@ func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 	return s
 }
 
+// Shorten сохраняет url для userID и возвращает короткую ссылку.
+// Если исходный URL уже существует, возвращает имеющуюся короткую ссылку и
+// ErrURLConflict.
 func (s *Shortener) Shorten(ctx context.Context, url, userID string) (string, error) {
 	if url == "" {
 		return "", ErrInvalidInput
@@ -95,6 +115,8 @@ func (s *Shortener) findExistingShortURL(ctx context.Context, url string) (strin
 	return s.makeShortURL(existingID), ErrURLConflict
 }
 
+// ShortenBatch сохраняет несколько URL для userID и возвращает их короткие
+// представления, сохраняя порядок входных данных.
 func (s *Shortener) ShortenBatch(ctx context.Context, items []BatchInput, userID string) ([]BatchOutput, error) {
 	if len(items) == 0 {
 		return nil, ErrInvalidInput
@@ -185,6 +207,7 @@ func (s *Shortener) shortenBatchOneByOne(ctx context.Context, entries []reposito
 	return results, nil
 }
 
+// GetOriginal возвращает исходный URL по идентификатору короткой ссылки.
 func (s *Shortener) GetOriginal(ctx context.Context, id string) (string, error) {
 	url, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -196,6 +219,7 @@ func (s *Shortener) GetOriginal(ctx context.Context, id string) (string, error) 
 	return url, nil
 }
 
+// DeleteUserURLs асинхронно помечает короткие ссылки пользователя как удалённые.
 func (s *Shortener) DeleteUserURLs(shortIDs []string, userID string) {
 	inputCh := generateDeleteTasks(shortIDs, userID)
 	go func() {
@@ -253,6 +277,7 @@ func (s *Shortener) flushDeleteBatch(tasks []deleteTask) {
 	}
 }
 
+// GetUserURLs возвращает все URL, созданные userID, с полными короткими ссылками.
 func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]UserURLOutput, error) {
 	pairs, err := s.repo.GetURLsByUser(ctx, userID)
 	if err != nil {

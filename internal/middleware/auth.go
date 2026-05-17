@@ -8,6 +8,8 @@ import (
 
 const cookieName = "auth_token"
 
+// AuthMiddleware гарантирует наличие подписанной cookie с идентификатором
+// пользователя и сохраняет этот идентификатор в контексте запроса.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var userID string
