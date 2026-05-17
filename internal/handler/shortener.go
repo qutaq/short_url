@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/auth"
 	"github.com/qutaq/short_url/internal/service"
 )
@@ -25,10 +26,15 @@ type shortenResponse struct {
 
 type ShortenerHandler struct {
 	shortener *service.Shortener
+	auditor   audit.Observer
 }
 
-func NewShortenerHandler(shortener *service.Shortener) *ShortenerHandler {
-	return &ShortenerHandler{shortener: shortener}
+func NewShortenerHandler(shortener *service.Shortener, auditors ...audit.Observer) *ShortenerHandler {
+	var auditor audit.Observer
+	if len(auditors) > 0 {
+		auditor = auditors[0]
+	}
+	return &ShortenerHandler{shortener: shortener, auditor: auditor}
 }
 
 type batchRequest struct {
@@ -92,7 +98,9 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortURL))
+	if _, err := w.Write([]byte(shortURL)); err == nil {
+		h.notifyAudit(r, audit.ActionShorten, userID, rawURL)
+	}
 }
 
 func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +117,9 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+
+	userID, _ := auth.UserIDFromContext(r.Context())
+	h.notifyAudit(r, audit.ActionFollow, userID, originalURL)
 }
 
 func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +153,16 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
+	if err := json.NewEncoder(w).Encode(shortenResponse{Result: shortURL}); err == nil {
+		h.notifyAudit(r, audit.ActionShorten, userID, rawURL)
+	}
+}
+
+func (h *ShortenerHandler) notifyAudit(r *http.Request, action, userID, rawURL string) {
+	if h.auditor == nil {
+		return
+	}
+	_ = h.auditor.Notify(r.Context(), audit.NewEvent(action, userID, rawURL))
 }
 
 func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Request) {

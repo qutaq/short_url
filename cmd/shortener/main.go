@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
+	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/config"
 	"github.com/qutaq/short_url/internal/handler"
 	"github.com/qutaq/short_url/internal/middleware"
@@ -67,8 +68,14 @@ func main() {
 		repo = repository.NewMemoryRepository()
 	}
 
+	auditor, closeAudit, err := newAuditNotifier(cfg)
+	if err != nil {
+		log.Fatal("failed to configure audit:", err)
+	}
+	defer closeAudit()
+
 	shortener := service.NewShortener(repo, cfg.BaseURL)
-	h := handler.NewShortenerHandler(shortener)
+	h := handler.NewShortenerHandler(shortener, auditor)
 
 	r.Get("/ping", handler.PingDB(pool))
 	r.Post("/", h.PostShorten)
@@ -108,6 +115,40 @@ func newRouter(logger *zap.Logger) *chi.Mux {
 	r.Use(middleware.GzipMiddleware)
 	r.Use(middleware.AuthMiddleware)
 	return r
+}
+
+func newAuditNotifier(cfg *config.Config) (*audit.Notifier, func(), error) {
+	var observers []audit.Observer
+	var closeFuncs []func() error
+
+	if cfg.AuditFile != "" {
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		observers = append(observers, fileObserver)
+		closeFuncs = append(closeFuncs, fileObserver.Close)
+	}
+
+	if cfg.AuditURL != "" {
+		remoteObserver, err := audit.NewRemoteObserver(cfg.AuditURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		observers = append(observers, remoteObserver)
+	}
+
+	closeAudit := func() {
+		for _, closeFn := range closeFuncs {
+			if err := closeFn(); err != nil {
+				log.Printf("failed to close audit observer: %v", err)
+			}
+		}
+	}
+	if len(observers) == 0 {
+		return nil, closeAudit, nil
+	}
+	return audit.NewNotifier(observers...), closeAudit, nil
 }
 
 func runMigrations(db *sql.DB) error {
