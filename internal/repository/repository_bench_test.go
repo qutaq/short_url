@@ -10,8 +10,10 @@ func BenchmarkMemoryRepositorySave(b *testing.B) {
 	repo := NewMemoryRepository()
 
 	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
 		id := fmt.Sprintf("id-%d", i)
 		rawURL := fmt.Sprintf("https://example.com/%d", i)
+		b.StartTimer()
 		if err := repo.Save(ctx, id, rawURL, "user-1"); err != nil {
 			b.Fatal(err)
 		}
@@ -44,6 +46,7 @@ func BenchmarkMemoryRepositorySaveBatch(b *testing.B) {
 	const batchSize = 100
 
 	for batch := 0; b.Loop(); batch++ {
+		b.StopTimer()
 		entries := make([]BatchEntry, batchSize)
 		for i := range entries {
 			n := batch*batchSize + i
@@ -53,6 +56,7 @@ func BenchmarkMemoryRepositorySaveBatch(b *testing.B) {
 				UserID: "user-1",
 			}
 		}
+		b.StartTimer()
 		if err := repo.SaveBatch(ctx, entries); err != nil {
 			b.Fatal(err)
 		}

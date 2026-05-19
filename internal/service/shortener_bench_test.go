@@ -14,7 +14,9 @@ func BenchmarkShortenerShorten(b *testing.B) {
 	shortener := NewShortener(repository.NewMemoryRepository(), benchmarkBaseURL)
 
 	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
 		rawURL := fmt.Sprintf("https://example.com/%d", i)
+		b.StartTimer()
 		shortURL, err := shortener.Shorten(ctx, rawURL, "user-1")
 		if err != nil {
 			b.Fatal(err)
@@ -31,6 +33,7 @@ func BenchmarkShortenerShortenBatch(b *testing.B) {
 	const batchSize = 100
 
 	for batch := 0; b.Loop(); batch++ {
+		b.StopTimer()
 		items := make([]BatchInput, batchSize)
 		for i := range items {
 			n := batch*batchSize + i
@@ -39,6 +42,7 @@ func BenchmarkShortenerShortenBatch(b *testing.B) {
 				OriginalURL:   fmt.Sprintf("https://example.com/%d", n),
 			}
 		}
+		b.StartTimer()
 		results, err := shortener.ShortenBatch(ctx, items, "user-1")
 		if err != nil {
 			b.Fatal(err)

@@ -29,8 +29,10 @@ func BenchmarkPostShorten(b *testing.B) {
 	r := setupBenchmarkHandler()
 
 	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
 		req := httptest.NewRequest(http.MethodPost, "http://test/", bytes.NewBufferString(fmt.Sprintf("https://example.com/%d", i)))
 		rec := httptest.NewRecorder()
+		b.StartTimer()
 		r.ServeHTTP(rec, req)
 		if rec.Code != http.StatusCreated {
 			b.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
@@ -42,6 +44,7 @@ func BenchmarkPostShortenJSON(b *testing.B) {
 	r := setupBenchmarkHandler()
 
 	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
 		body, err := json.Marshal(shortenRequest{URL: fmt.Sprintf("https://example.com/%d", i)})
 		if err != nil {
 			b.Fatal(err)
@@ -49,6 +52,7 @@ func BenchmarkPostShortenJSON(b *testing.B) {
 		req := httptest.NewRequest(http.MethodPost, "http://test/api/shorten", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
+		b.StartTimer()
 		r.ServeHTTP(rec, req)
 		if rec.Code != http.StatusCreated {
 			b.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
