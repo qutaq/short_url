@@ -68,11 +68,11 @@ func main() {
 		repo = repository.NewMemoryRepository()
 	}
 
-	auditor, closeAudit, err := newAuditNotifier(cfg)
+	auditor, auditObservers, err := newAuditNotifier(cfg)
 	if err != nil {
 		log.Fatal("failed to configure audit:", err)
 	}
-	defer closeAudit()
+	defer auditObservers.closeFileObserver()
 
 	shortener := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.NewShortenerHandler(shortener, auditor)
@@ -117,9 +117,22 @@ func newRouter(logger *zap.Logger) *chi.Mux {
 	return r
 }
 
-func newAuditNotifier(cfg *config.Config) (*audit.Notifier, func(), error) {
+type auditObservers struct {
+	file *audit.FileObserver
+}
+
+func (o *auditObservers) closeFileObserver() {
+	if o == nil || o.file == nil {
+		return
+	}
+	if err := o.file.Close(); err != nil {
+		log.Printf("failed to close audit file observer: %v", err)
+	}
+}
+
+func newAuditNotifier(cfg *config.Config) (*audit.Notifier, *auditObservers, error) {
 	var observers []audit.Observer
-	var closeFuncs []func() error
+	auditObservers := &auditObservers{}
 
 	if cfg.AuditFile != "" {
 		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
@@ -127,7 +140,7 @@ func newAuditNotifier(cfg *config.Config) (*audit.Notifier, func(), error) {
 			return nil, nil, err
 		}
 		observers = append(observers, fileObserver)
-		closeFuncs = append(closeFuncs, fileObserver.Close)
+		auditObservers.file = fileObserver
 	}
 
 	if cfg.AuditURL != "" {
@@ -138,17 +151,10 @@ func newAuditNotifier(cfg *config.Config) (*audit.Notifier, func(), error) {
 		observers = append(observers, remoteObserver)
 	}
 
-	closeAudit := func() {
-		for _, closeFn := range closeFuncs {
-			if err := closeFn(); err != nil {
-				log.Printf("failed to close audit observer: %v", err)
-			}
-		}
-	}
 	if len(observers) == 0 {
-		return nil, closeAudit, nil
+		return nil, auditObservers, nil
 	}
-	return audit.NewNotifier(observers...), closeAudit, nil
+	return audit.NewNotifier(observers...), auditObservers, nil
 }
 
 func runMigrations(db *sql.DB) error {
