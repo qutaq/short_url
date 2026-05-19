@@ -9,7 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestNewEvent(t *testing.T) {
@@ -39,6 +42,91 @@ func TestNotifierJoinsObserverErrors(t *testing.T) {
 	emptyNotifier := NewNotifier()
 	if err := emptyNotifier.Notify(context.Background(), Event{}); err != nil {
 		t.Fatalf("empty notifier Notify error = %v, want nil", err)
+	}
+}
+
+func TestNotifierDoesNotLetSlowObserverDelayOthers(t *testing.T) {
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	fastNotified := make(chan struct{})
+	notifier := NewNotifier(
+		observerFunc(func(context.Context, Event) error {
+			close(slowStarted)
+			<-releaseSlow
+			return nil
+		}),
+		observerFunc(func(context.Context, Event) error {
+			close(fastNotified)
+			return nil
+		}),
+	)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- notifier.Notify(context.Background(), Event{})
+	}()
+
+	waitForSignal(t, slowStarted, "slow observer to start")
+	waitForSignal(t, fastNotified, "fast observer to be notified")
+	close(releaseSlow)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Notify error = %v, want nil", err)
+	}
+}
+
+func TestNotifierLimitsConcurrentObserverNotifications(t *testing.T) {
+	const notifyCalls = 20
+
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	observer := observerFunc(func(context.Context, Event) error {
+		current := active.Add(1)
+		updateMax(&maxActive, current)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		active.Add(-1)
+		return nil
+	})
+	notifier := NewNotifier(observer, observer)
+
+	errCh := make(chan error, notifyCalls)
+	var wg sync.WaitGroup
+	for i := 0; i < notifyCalls; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- notifier.Notify(context.Background(), Event{})
+		}()
+	}
+
+	waitForSignal(t, entered, "first observer to start")
+	waitForSignal(t, entered, "second observer to start")
+	time.Sleep(50 * time.Millisecond)
+	if got, want := maxActive.Load(), int32(2); got > want {
+		close(release)
+		t.Fatalf("max active observer notifications = %d, want at most %d", got, want)
+	}
+
+	close(release)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	waitForSignal(t, done, "all notifications to finish")
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("Notify error = %v, want nil", err)
+		}
+	}
+	if got, want := maxActive.Load(), int32(2); got > want {
+		t.Fatalf("max active observer notifications = %d, want at most %d", got, want)
 	}
 }
 
@@ -126,4 +214,22 @@ type observerFunc func(context.Context, Event) error
 
 func (f observerFunc) Notify(ctx context.Context, event Event) error {
 	return f(ctx, event)
+}
+
+func waitForSignal(t *testing.T, ch <-chan struct{}, want string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", want)
+	}
+}
+
+func updateMax(max *atomic.Int32, current int32) {
+	for {
+		previous := max.Load()
+		if current <= previous || max.CompareAndSwap(previous, current) {
+			return
+		}
+	}
 }

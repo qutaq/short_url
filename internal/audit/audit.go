@@ -52,18 +52,48 @@ type Observer interface {
 // Notifier передаёт события аудита одному или нескольким наблюдателям.
 type Notifier struct {
 	observers []Observer
+	sem       chan struct{}
 }
 
 // NewNotifier создаёт Notifier для переданных наблюдателей.
 func NewNotifier(observers ...Observer) *Notifier {
-	return &Notifier{observers: observers}
+	notifier := &Notifier{observers: observers}
+	if len(observers) > 0 {
+		notifier.sem = make(chan struct{}, len(observers))
+	}
+	return notifier
 }
 
-// Notify отправляет событие каждому настроенному наблюдателю и объединяет ошибки.
+// Notify отправляет событие всем настроенным наблюдателям параллельно и объединяет ошибки.
 func (n *Notifier) Notify(ctx context.Context, event Event) error {
+	if len(n.observers) == 0 {
+		return nil
+	}
+
+	errCh := make(chan error, len(n.observers))
+	var wg sync.WaitGroup
 	var err error
+
 	for _, observer := range n.observers {
-		err = errors.Join(err, observer.Notify(ctx, event))
+		select {
+		case n.sem <- struct{}{}:
+		case <-ctx.Done():
+			err = errors.Join(err, ctx.Err())
+			continue
+		}
+
+		wg.Add(1)
+		go func(observer Observer) {
+			defer wg.Done()
+			defer func() { <-n.sem }()
+			errCh <- observer.Notify(ctx, event)
+		}(observer)
+	}
+
+	wg.Wait()
+	close(errCh)
+	for observerErr := range errCh {
+		err = errors.Join(err, observerErr)
 	}
 	return err
 }
