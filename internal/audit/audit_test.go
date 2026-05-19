@@ -191,6 +191,38 @@ func TestRemoteObserver(t *testing.T) {
 	}
 }
 
+func TestRemoteObserverRetriesTransientFailures(t *testing.T) {
+	var attempts atomic.Int32
+	var got Event
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := attempts.Add(1)
+		if attempt < 3 {
+			http.Error(w, "temporary failure", http.StatusBadGateway)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("Decode body: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	observer, err := NewRemoteObserver(server.URL)
+	if err != nil {
+		t.Fatalf("NewRemoteObserver: %v", err)
+	}
+	event := Event{Timestamp: 1, Action: ActionShorten, URL: "https://example.com"}
+	if err := observer.Notify(context.Background(), event); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if gotAttempts, want := attempts.Load(), int32(3); gotAttempts != want {
+		t.Fatalf("attempts = %d, want %d", gotAttempts, want)
+	}
+	if got != event {
+		t.Fatalf("remote event = %#v, want %#v", got, event)
+	}
+}
+
 func TestRemoteObserverErrors(t *testing.T) {
 	if _, err := NewRemoteObserver("://bad-url"); err == nil {
 		t.Fatal("NewRemoteObserver invalid URL error = nil, want error")

@@ -12,6 +12,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 const (
@@ -19,6 +21,13 @@ const (
 	ActionShorten = "shorten"
 	// ActionFollow идентифицирует события аудита после переходов по коротким ссылкам.
 	ActionFollow = "follow"
+)
+
+const (
+	remoteObserverRequestTimeout = 5 * time.Second
+	remoteObserverRetryMax       = 3
+	remoteObserverRetryWaitMin   = 100 * time.Millisecond
+	remoteObserverRetryWaitMax   = time.Second
 )
 
 // Event описывает одно аудируемое действие пользователя.
@@ -155,11 +164,22 @@ func NewRemoteObserver(rawURL string) (*RemoteObserver, error) {
 	}
 
 	return &RemoteObserver{
-		url: rawURL,
-		client: &http.Client{
-			Timeout: 5 * time.Second,
-		},
+		url:    rawURL,
+		client: newRetryableHTTPClient(),
 	}, nil
+}
+
+func newRetryableHTTPClient() *http.Client {
+	client := retryablehttp.NewClient()
+	client.RetryMax = remoteObserverRetryMax
+	client.RetryWaitMin = remoteObserverRetryWaitMin
+	client.RetryWaitMax = remoteObserverRetryWaitMax
+	client.Logger = nil
+	client.HTTPClient = &http.Client{
+		Timeout: remoteObserverRequestTimeout,
+	}
+
+	return client.StandardClient()
 }
 
 // Notify отправляет событие на удалённую точку приёма аудита в формате JSON.
