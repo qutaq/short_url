@@ -1,9 +1,6 @@
 package auth
 
-import (
-	"context"
-	"testing"
-)
+import "testing"
 
 func BenchmarkGenerateUserID(b *testing.B) {
 	for b.Loop() {
@@ -45,7 +42,7 @@ func BenchmarkVerifyToken(b *testing.B) {
 
 func BenchmarkContextWithUserID(b *testing.B) {
 	userID := "0123456789abcdef0123456789abcdef"
-	ctx := context.Background()
+	ctx := b.Context()
 
 	for b.Loop() {
 		if _, ok := UserIDFromContext(ContextWithUserID(ctx, userID)); !ok {

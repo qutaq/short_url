@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 const benchmarkBaseURL = "http://localhost:8080"
 
 func BenchmarkShortenerShorten(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	shortener := NewShortener(repository.NewMemoryRepository(), benchmarkBaseURL)
 
 	for i := 0; b.Loop(); i++ {
@@ -27,7 +26,7 @@ func BenchmarkShortenerShorten(b *testing.B) {
 }
 
 func BenchmarkShortenerShortenBatch(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	shortener := NewShortener(repository.NewMemoryRepository(), benchmarkBaseURL)
 	const batchSize = 100
 
@@ -51,7 +50,7 @@ func BenchmarkShortenerShortenBatch(b *testing.B) {
 }
 
 func BenchmarkShortenerGetOriginal(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	repo := repository.NewMemoryRepository()
 	shortener := NewShortener(repo, benchmarkBaseURL)
 	const id = "known-id"
@@ -72,7 +71,7 @@ func BenchmarkShortenerGetOriginal(b *testing.B) {
 }
 
 func BenchmarkShortenerGetUserURLs(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	repo := repository.NewMemoryRepository()
 	shortener := NewShortener(repo, benchmarkBaseURL)
 	const userID = "user-1"

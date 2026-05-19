@@ -1,13 +1,12 @@
 package repository
 
 import (
-	"context"
 	"fmt"
 	"testing"
 )
 
 func BenchmarkMemoryRepositorySave(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	repo := NewMemoryRepository()
 
 	for i := 0; b.Loop(); i++ {
@@ -20,7 +19,7 @@ func BenchmarkMemoryRepositorySave(b *testing.B) {
 }
 
 func BenchmarkMemoryRepositoryGet(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	repo := NewMemoryRepository()
 	const id = "known-id"
 	const rawURL = "https://example.com/known"
@@ -40,7 +39,7 @@ func BenchmarkMemoryRepositoryGet(b *testing.B) {
 }
 
 func BenchmarkMemoryRepositorySaveBatch(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	repo := NewMemoryRepository()
 	const batchSize = 100
 
@@ -61,7 +60,7 @@ func BenchmarkMemoryRepositorySaveBatch(b *testing.B) {
 }
 
 func BenchmarkMemoryRepositoryGetURLsByUser(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	repo := NewMemoryRepository()
 	const userID = "user-1"
 	const urls = 1000
