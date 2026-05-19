@@ -61,10 +61,6 @@ func NewNotifier(observers ...Observer) *Notifier {
 
 // Notify отправляет событие каждому настроенному наблюдателю и объединяет ошибки.
 func (n *Notifier) Notify(ctx context.Context, event Event) error {
-	if n == nil {
-		return nil
-	}
-
 	var err error
 	for _, observer := range n.observers {
 		err = errors.Join(err, observer.Notify(ctx, event))

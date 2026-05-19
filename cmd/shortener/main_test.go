@@ -52,8 +52,8 @@ func TestNewAuditNotifier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAuditNotifier empty: %v", err)
 	}
-	if notifier != nil {
-		t.Fatal("newAuditNotifier empty returned notifier, want nil")
+	if notifier == nil {
+		t.Fatal("newAuditNotifier empty returned nil notifier")
 	}
 	auditObservers.closeFileObserver()
 

@@ -36,9 +36,9 @@ func TestNotifierJoinsObserverErrors(t *testing.T) {
 		t.Fatalf("Notify error = %v, want both observer errors", err)
 	}
 
-	var nilNotifier *Notifier
-	if err := nilNotifier.Notify(context.Background(), Event{}); err != nil {
-		t.Fatalf("nil notifier Notify error = %v, want nil", err)
+	emptyNotifier := NewNotifier()
+	if err := emptyNotifier.Notify(context.Background(), Event{}); err != nil {
+		t.Fatalf("empty notifier Notify error = %v, want nil", err)
 	}
 }
 

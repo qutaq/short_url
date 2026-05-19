@@ -36,7 +36,7 @@ type ShortenerHandler struct {
 // NewShortenerHandler создаёт ShortenerHandler на основе shortener.
 // Первый необязательный auditor получает события успешного сокращения и перехода.
 func NewShortenerHandler(shortener *service.Shortener, auditors ...audit.Observer) *ShortenerHandler {
-	var auditor audit.Observer
+	auditor := audit.Observer(audit.NewNotifier())
 	if len(auditors) > 0 {
 		auditor = auditors[0]
 	}
@@ -168,9 +168,6 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ShortenerHandler) notifyAudit(r *http.Request, action, userID, rawURL string) {
-	if h.auditor == nil {
-		return
-	}
 	_ = h.auditor.Notify(r.Context(), audit.NewEvent(action, userID, rawURL))
 }
 

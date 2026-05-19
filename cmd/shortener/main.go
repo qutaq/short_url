@@ -151,9 +151,6 @@ func newAuditNotifier(cfg *config.Config) (*audit.Notifier, *auditObservers, err
 		observers = append(observers, remoteObserver)
 	}
 
-	if len(observers) == 0 {
-		return nil, auditObservers, nil
-	}
 	return audit.NewNotifier(observers...), auditObservers, nil
 }
 
