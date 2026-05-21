@@ -60,15 +60,24 @@ type Observer interface {
 
 // Notifier передаёт события аудита одному или нескольким наблюдателям.
 type Notifier struct {
-	observers []Observer
-	sem       chan struct{}
+	observers []notifierObserver
+}
+
+type notifierObserver struct {
+	observer Observer
+	sem      chan struct{}
 }
 
 // NewNotifier создаёт Notifier для переданных наблюдателей.
 func NewNotifier(observers ...Observer) *Notifier {
-	notifier := &Notifier{observers: observers}
-	if len(observers) > 0 {
-		notifier.sem = make(chan struct{}, len(observers))
+	notifier := &Notifier{
+		observers: make([]notifierObserver, 0, len(observers)),
+	}
+	for _, observer := range observers {
+		notifier.observers = append(notifier.observers, notifierObserver{
+			observer: observer,
+			sem:      make(chan struct{}, 1),
+		})
 	}
 	return notifier
 }
@@ -81,26 +90,26 @@ func (n *Notifier) Notify(ctx context.Context, event Event) error {
 
 	errCh := make(chan error, len(n.observers))
 	var wg sync.WaitGroup
-	var err error
 
 	for _, observer := range n.observers {
-		select {
-		case n.sem <- struct{}{}:
-		case <-ctx.Done():
-			err = errors.Join(err, ctx.Err())
-			continue
-		}
-
 		wg.Add(1)
-		go func(observer Observer) {
+		go func(observer notifierObserver) {
 			defer wg.Done()
-			defer func() { <-n.sem }()
-			errCh <- observer.Notify(ctx, event)
+			select {
+			case observer.sem <- struct{}{}:
+				defer func() { <-observer.sem }()
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			}
+
+			errCh <- observer.observer.Notify(ctx, event)
 		}(observer)
 	}
 
 	wg.Wait()
 	close(errCh)
+	var err error
 	for observerErr := range errCh {
 		err = errors.Join(err, observerErr)
 	}

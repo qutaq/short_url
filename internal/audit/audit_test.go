@@ -74,6 +74,52 @@ func TestNotifierDoesNotLetSlowObserverDelayOthers(t *testing.T) {
 	}
 }
 
+func TestNotifierDoesNotLetBusyObserverBlockOthers(t *testing.T) {
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseSlow) })
+	})
+	fastNotified := make(chan struct{}, 2)
+	notifier := NewNotifier(
+		observerFunc(func(context.Context, Event) error {
+			select {
+			case slowStarted <- struct{}{}:
+			default:
+			}
+			<-releaseSlow
+			return nil
+		}),
+		observerFunc(func(context.Context, Event) error {
+			fastNotified <- struct{}{}
+			return nil
+		}),
+	)
+
+	firstErrCh := make(chan error, 1)
+	go func() {
+		firstErrCh <- notifier.Notify(context.Background(), Event{})
+	}()
+
+	waitForSignal(t, slowStarted, "first slow observer to start")
+	waitForSignal(t, fastNotified, "first fast observer to be notified")
+
+	secondErrCh := make(chan error, 1)
+	go func() {
+		secondErrCh <- notifier.Notify(context.Background(), Event{})
+	}()
+
+	waitForSignal(t, fastNotified, "second fast observer to be notified")
+	releaseOnce.Do(func() { close(releaseSlow) })
+	if err := <-firstErrCh; err != nil {
+		t.Fatalf("first Notify error = %v, want nil", err)
+	}
+	if err := <-secondErrCh; err != nil {
+		t.Fatalf("second Notify error = %v, want nil", err)
+	}
+}
+
 func TestNotifierLimitsConcurrentObserverNotifications(t *testing.T) {
 	const notifyCalls = 20
 
