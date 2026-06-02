@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
@@ -27,7 +28,13 @@ import (
 	dbmigrations "github.com/qutaq/short_url/migrations"
 )
 
+var buildVersion string
+var buildDate string
+var buildCommit string
+
 func main() {
+	printBuildInfo()
+
 	cfg := config.Load()
 
 	logger, err := zap.NewDevelopment()
@@ -107,6 +114,19 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server shutdown: %v", err)
 	}
+}
+
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", valueOrNA(buildVersion))
+	fmt.Printf("Build date: %s\n", valueOrNA(buildDate))
+	fmt.Printf("Build commit: %s\n", valueOrNA(buildCommit))
+}
+
+func valueOrNA(value string) string {
+	if value == "" {
+		return "N/A"
+	}
+	return value
 }
 
 func newRouter(logger *zap.Logger) *chi.Mux {
