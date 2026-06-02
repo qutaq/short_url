@@ -1,16 +1,19 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/auth"
 	"github.com/qutaq/short_url/internal/service"
 )
@@ -23,12 +26,21 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
+// ShortenerHandler предоставляет HTTP-обработчики для сокращения, раскрытия,
+// просмотра и удаления URL.
 type ShortenerHandler struct {
 	shortener *service.Shortener
+	auditor   audit.Observer
 }
 
-func NewShortenerHandler(shortener *service.Shortener) *ShortenerHandler {
-	return &ShortenerHandler{shortener: shortener}
+// NewShortenerHandler создаёт ShortenerHandler на основе shortener.
+// Первый необязательный auditor получает события успешного сокращения и перехода.
+func NewShortenerHandler(shortener *service.Shortener, auditors ...audit.Observer) *ShortenerHandler {
+	auditor := audit.Observer(audit.NewNotifier())
+	if len(auditors) > 0 {
+		auditor = auditors[0]
+	}
+	return &ShortenerHandler{shortener: shortener, auditor: auditor}
 }
 
 type batchRequest struct {
@@ -59,6 +71,7 @@ func statusFromError(err error) (code int, body string) {
 	}
 }
 
+// PostShorten обрабатывает запросы POST / с исходным URL в текстовом теле.
 func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -92,9 +105,12 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortURL))
+	if _, err := w.Write([]byte(shortURL)); err == nil {
+		h.notifyAudit(r, audit.ActionShorten, userID, rawURL)
+	}
 }
 
+// GetRedirect обрабатывает запросы GET /{id} и перенаправляет на исходный URL.
 func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -109,8 +125,12 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+
+	userID, _ := auth.UserIDFromContext(r.Context())
+	h.notifyAudit(r, audit.ActionFollow, userID, originalURL)
 }
 
+// PostShortenJSON обрабатывает запросы POST /api/shorten с URL в JSON-теле.
 func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Request) {
 	var req shortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -142,9 +162,16 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
+	if err := json.NewEncoder(w).Encode(shortenResponse{Result: shortURL}); err == nil {
+		h.notifyAudit(r, audit.ActionShorten, userID, rawURL)
+	}
 }
 
+func (h *ShortenerHandler) notifyAudit(r *http.Request, action, userID, rawURL string) {
+	_ = h.auditor.Notify(r.Context(), audit.NewEvent(action, userID, rawURL))
+}
+
+// PostShortenBatch обрабатывает запросы POST /api/shorten/batch с несколькими URL.
 func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Request) {
 	var req []batchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -193,6 +220,8 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(resp)
 }
 
+// GetUserURLs обрабатывает запросы GET /api/user/urls и возвращает URL,
+// принадлежащие аутентифицированному пользователю.
 func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
@@ -222,6 +251,8 @@ func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// DeleteUserURLs обрабатывает запросы DELETE /api/user/urls и планирует удаление
+// URL, принадлежащих аутентифицированному пользователю.
 func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
@@ -245,13 +276,16 @@ func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// PingDB возвращает обработчик, проверяющий подключение к PostgreSQL.
 func PingDB(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		if err := pool.Ping(r.Context()); err != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}

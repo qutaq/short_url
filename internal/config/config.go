@@ -10,6 +10,8 @@ const (
 	defaultBaseURL         = "http://localhost:8080"
 	defaultFileStoragePath = "urls.json"
 	defaultDatabaseDSN     = ""
+	defaultAuditFile       = ""
+	defaultAuditURL        = ""
 )
 
 var (
@@ -17,15 +19,28 @@ var (
 	baseURL         = flag.String("b", defaultBaseURL, "Base URL for shortened links")
 	fileStoragePath = flag.String("f", defaultFileStoragePath, "Path to file storage for URLs")
 	databaseDSN     = flag.String("d", defaultDatabaseDSN, "PostgreSQL connection string")
+	auditFile       = flag.String("audit-file", defaultAuditFile, "Path to audit log file")
+	auditURL        = flag.String("audit-url", defaultAuditURL, "Remote audit receiver URL")
 )
 
+// Config содержит настройки запуска сервера сокращения ссылок.
 type Config struct {
-	ServerAddr      string
-	BaseURL         string
+	// ServerAddr содержит адрес, на котором HTTP-сервер принимает запросы.
+	ServerAddr string
+	// BaseURL содержит публичный префикс для формирования коротких ссылок.
+	BaseURL string
+	// FileStoragePath содержит путь к файловому JSONL-хранилищу.
 	FileStoragePath string
-	DatabaseDSN     string
+	// DatabaseDSN содержит строку подключения к PostgreSQL.
+	DatabaseDSN string
+	// AuditFile содержит необязательный путь для локальных событий аудита.
+	AuditFile string
+	// AuditURL содержит необязательную удалённую точку приёма событий аудита.
+	AuditURL string
 }
 
+// Load читает конфигурацию из переменных окружения и флагов командной строки.
+// Переменные окружения имеют приоритет над явно переданными флагами.
 func Load() *Config {
 	flag.Parse()
 
@@ -39,6 +54,8 @@ func Load() *Config {
 		BaseURL:         resolve("BASE_URL", *baseURL, flagSet["b"], defaultBaseURL),
 		FileStoragePath: resolve("FILE_STORAGE_PATH", *fileStoragePath, flagSet["f"], defaultFileStoragePath),
 		DatabaseDSN:     resolve("DATABASE_DSN", *databaseDSN, flagSet["d"], defaultDatabaseDSN),
+		AuditFile:       resolve("AUDIT_FILE", *auditFile, flagSet["audit-file"], defaultAuditFile),
+		AuditURL:        resolve("AUDIT_URL", *auditURL, flagSet["audit-url"], defaultAuditURL),
 	}
 }
 

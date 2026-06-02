@@ -17,6 +17,7 @@ type urlRecord struct {
 	UserID      string `json:"user_id,omitempty"`
 }
 
+// FileRepository хранит записи URL в памяти и сохраняет их в JSONL-файл.
 type FileRepository struct {
 	mu       sync.RWMutex
 	data     map[string]string
@@ -28,6 +29,8 @@ type FileRepository struct {
 	nextUUID int
 }
 
+// NewFileRepository создаёт файловый репозиторий URL и загружает существующие
+// записи из filePath.
 func NewFileRepository(filePath string) (*FileRepository, error) {
 	r := &FileRepository{
 		data:     make(map[string]string),
@@ -44,6 +47,7 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 	return r, nil
 }
 
+// Save сохраняет одну запись короткой ссылки и добавляет её в файл хранилища.
 func (r *FileRepository) Save(ctx context.Context, id, url, userID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -80,6 +84,7 @@ func (r *FileRepository) Save(ctx context.Context, id, url, userID string) error
 	return nil
 }
 
+// SaveBatch сохраняет несколько записей коротких ссылок и перезаписывает файл хранилища.
 func (r *FileRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -110,6 +115,7 @@ func (r *FileRepository) SaveBatch(ctx context.Context, entries []BatchEntry) er
 	return r.flush()
 }
 
+// Get возвращает исходный URL по идентификатору короткой ссылки.
 func (r *FileRepository) Get(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -126,6 +132,7 @@ func (r *FileRepository) Get(ctx context.Context, id string) (string, error) {
 	return url, nil
 }
 
+// DeleteUserURLs помечает URL, принадлежащие userID, как удалённые.
 func (r *FileRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -140,6 +147,7 @@ func (r *FileRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, 
 	return nil
 }
 
+// GetByOriginalURL ищет идентификатор короткой ссылки по исходному URL.
 func (r *FileRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, err
@@ -150,6 +158,7 @@ func (r *FileRepository) GetByOriginalURL(ctx context.Context, url string) (stri
 	return id, ok, nil
 }
 
+// GetURLsByUser возвращает записи URL, созданные userID.
 func (r *FileRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
+	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/config"
 	"github.com/qutaq/short_url/internal/handler"
 	"github.com/qutaq/short_url/internal/middleware"
@@ -67,8 +68,14 @@ func main() {
 		repo = repository.NewMemoryRepository()
 	}
 
+	auditor, auditObservers, err := newAuditNotifier(cfg)
+	if err != nil {
+		log.Fatal("failed to configure audit:", err)
+	}
+	defer auditObservers.closeFileObserver()
+
 	shortener := service.NewShortener(repo, cfg.BaseURL)
-	h := handler.NewShortenerHandler(shortener)
+	h := handler.NewShortenerHandler(shortener, auditor)
 
 	r.Get("/ping", handler.PingDB(pool))
 	r.Post("/", h.PostShorten)
@@ -110,6 +117,43 @@ func newRouter(logger *zap.Logger) *chi.Mux {
 	return r
 }
 
+type auditObservers struct {
+	file *audit.FileObserver
+}
+
+func (o *auditObservers) closeFileObserver() {
+	if o == nil || o.file == nil {
+		return
+	}
+	if err := o.file.Close(); err != nil {
+		log.Printf("failed to close audit file observer: %v", err)
+	}
+}
+
+func newAuditNotifier(cfg *config.Config) (*audit.Notifier, *auditObservers, error) {
+	var observers []audit.Observer
+	auditObservers := &auditObservers{}
+
+	if cfg.AuditFile != "" {
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		observers = append(observers, fileObserver)
+		auditObservers.file = fileObserver
+	}
+
+	if cfg.AuditURL != "" {
+		remoteObserver, err := audit.NewRemoteObserver(cfg.AuditURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		observers = append(observers, remoteObserver)
+	}
+
+	return audit.NewNotifier(observers...), auditObservers, nil
+}
+
 func runMigrations(db *sql.DB) error {
 	source, err := iofs.New(dbmigrations.FS, ".")
 	if err != nil {
@@ -123,6 +167,15 @@ func runMigrations(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		sourceErr, databaseErr := m.Close()
+		if sourceErr != nil {
+			log.Printf("failed to close migration source: %v", sourceErr)
+		}
+		if databaseErr != nil {
+			log.Printf("failed to close migration database: %v", databaseErr)
+		}
+	}()
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return err
 	}

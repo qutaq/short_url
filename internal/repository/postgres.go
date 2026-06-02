@@ -13,14 +13,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// PostgresRepository хранит записи URL в PostgreSQL.
 type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
+// NewPostgresRepository создаёт репозиторий URL на основе PostgreSQL.
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
+// Save сохраняет одну запись короткой ссылки в PostgreSQL.
 func (r *PostgresRepository) Save(ctx context.Context, id, url, userID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -44,6 +47,7 @@ func (r *PostgresRepository) Save(ctx context.Context, id, url, userID string) e
 	return nil
 }
 
+// SaveBatch сохраняет несколько записей коротких ссылок в одной транзакции.
 func (r *PostgresRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -77,6 +81,7 @@ func (r *PostgresRepository) SaveBatch(ctx context.Context, entries []BatchEntry
 	return tx.Commit(ctx)
 }
 
+// Get возвращает исходный URL по идентификатору короткой ссылки.
 func (r *PostgresRepository) Get(ctx context.Context, id string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -97,6 +102,7 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (string, error)
 	return originalURL, nil
 }
 
+// DeleteUserURLs помечает URL, принадлежащие userID, как удалённые.
 func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error {
 	if len(shortIDs) == 0 {
 		return nil
@@ -121,6 +127,7 @@ func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, shortIDs []stri
 	return err
 }
 
+// GetByOriginalURL ищет идентификатор короткой ссылки по исходному URL.
 func (r *PostgresRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -137,6 +144,7 @@ func (r *PostgresRepository) GetByOriginalURL(ctx context.Context, url string) (
 	return shortID, true, nil
 }
 
+// GetURLsByUser возвращает записи URL, созданные userID.
 func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
