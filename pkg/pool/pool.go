@@ -12,13 +12,15 @@ type Pool[T Resetter] struct {
 	pool sync.Pool
 }
 
-// New создаёт типизированный пул и при необходимости задаёт фабрику объектов.
+// New создаёт типизированный пул с обязательной фабрикой объектов.
+// Передача nil в factory приводит к панике.
 func New[T Resetter](factory func() T) *Pool[T] {
+	if factory == nil {
+		panic("pool: factory must not be nil")
+	}
 	p := &Pool[T]{}
-	if factory != nil {
-		p.pool.New = func() any {
-			return factory()
-		}
+	p.pool.New = func() any {
+		return factory()
 	}
 	return p
 }
