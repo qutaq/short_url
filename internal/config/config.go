@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"strconv"
 )
 
 const (
@@ -21,6 +22,7 @@ var (
 	databaseDSN     = flag.String("d", defaultDatabaseDSN, "PostgreSQL connection string")
 	auditFile       = flag.String("audit-file", defaultAuditFile, "Path to audit log file")
 	auditURL        = flag.String("audit-url", defaultAuditURL, "Remote audit receiver URL")
+	enableHTTPS     = flag.Bool("s", false, "Enable HTTPS server")
 )
 
 // Config содержит настройки запуска сервера сокращения ссылок.
@@ -37,6 +39,8 @@ type Config struct {
 	AuditFile string
 	// AuditURL содержит необязательную удалённую точку приёма событий аудита.
 	AuditURL string
+	// EnableHTTPS включает запуск веб-сервера по HTTPS.
+	EnableHTTPS bool
 }
 
 // Load читает конфигурацию из переменных окружения и флагов командной строки.
@@ -56,12 +60,30 @@ func Load() *Config {
 		DatabaseDSN:     resolve("DATABASE_DSN", *databaseDSN, flagSet["d"], defaultDatabaseDSN),
 		AuditFile:       resolve("AUDIT_FILE", *auditFile, flagSet["audit-file"], defaultAuditFile),
 		AuditURL:        resolve("AUDIT_URL", *auditURL, flagSet["audit-url"], defaultAuditURL),
+		EnableHTTPS:     resolveBool("ENABLE_HTTPS", *enableHTTPS, flagSet["s"], false),
 	}
 }
 
 func resolve(envKey, flagVal string, flagExplicit bool, defaultVal string) string {
 	if env, ok := os.LookupEnv(envKey); ok {
 		return env
+	}
+	if flagExplicit {
+		return flagVal
+	}
+	return defaultVal
+}
+
+func resolveBool(envKey string, flagVal, flagExplicit, defaultVal bool) bool {
+	if env, ok := os.LookupEnv(envKey); ok {
+		if env == "" {
+			return true
+		}
+		parsed, err := strconv.ParseBool(env)
+		if err != nil {
+			return defaultVal
+		}
+		return parsed
 	}
 	if flagExplicit {
 		return flagVal
