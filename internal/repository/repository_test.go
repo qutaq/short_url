@@ -144,6 +144,33 @@ func TestFileRepositoryPersistsRecords(t *testing.T) {
 	}
 }
 
+func TestFileRepositoryClosePersistsDeletedURLs(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "urls.jsonl")
+
+	repo, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf("NewFileRepository: %v", err)
+	}
+	if err := repo.Save(ctx, "short1", "https://example.com/1", "user1"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := repo.DeleteUserURLs(ctx, []string{"short1"}, "user1"); err != nil {
+		t.Fatalf("DeleteUserURLs: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reloaded, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf("NewFileRepository reload: %v", err)
+	}
+	if _, err := reloaded.Get(ctx, "short1"); !errors.Is(err, ErrDeleted) {
+		t.Fatalf("Get deleted reloaded error = %v, want %v", err, ErrDeleted)
+	}
+}
+
 func TestFileRepositoryLoadErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "urls.jsonl")
 	if err := os.WriteFile(path, []byte("{invalid json}\n"), 0644); err != nil {

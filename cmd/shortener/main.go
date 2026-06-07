@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-migrate/migrate/v4"
@@ -105,15 +104,16 @@ func main() {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 	<-ctx.Done()
+	stop()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(context.Background()); err != nil {
 		log.Printf("Server shutdown: %v", err)
 	}
+	shortener.Close()
+	closeRepository(repo)
 }
 
 func printBuildInfo() {
@@ -165,6 +165,18 @@ func newAuditNotifier(cfg *config.Config) (*audit.Notifier, *auditObservers, err
 	}
 
 	return audit.NewNotifier(observers...), auditObservers, nil
+}
+
+func closeRepository(repo repository.URLRepository) {
+	closer, ok := repo.(interface {
+		Close() error
+	})
+	if !ok {
+		return
+	}
+	if err := closer.Close(); err != nil {
+		log.Printf("failed to close repository: %v", err)
+	}
 }
 
 func runMigrations(db *sql.DB) error {
