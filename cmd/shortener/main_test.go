@@ -117,7 +117,7 @@ func TestListenAndServeReturnsErrorForInvalidAddr(t *testing.T) {
 				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
 			}
 
-			if err := listenAndServe(srv, tt.enableHTTPS); err == nil {
+			if err := listenAndServe(srv, tt.enableHTTPS, zap.NewNop()); err == nil {
 				t.Fatal("listenAndServe error = nil, want error")
 			}
 		})

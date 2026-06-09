@@ -17,32 +17,29 @@ const (
 	defaultAuditURL        = ""
 )
 
-var (
-	serverAddr      *string
-	baseURL         *string
-	fileStoragePath *string
-	databaseDSN     *string
-	auditFile       *string
-	auditURL        *string
-	enableHTTPS     *bool
+type flagValues struct {
+	serverAddr      string
+	baseURL         string
+	fileStoragePath string
+	databaseDSN     string
+	auditFile       string
+	auditURL        string
+	enableHTTPS     bool
 	configPath      string
-)
-
-func init() {
-	registerFlags(flag.CommandLine)
 }
 
-func registerFlags(flagSet *flag.FlagSet) {
-	configPath = ""
-	serverAddr = flagSet.String("a", defaultServerAddr, "HTTP server address")
-	baseURL = flagSet.String("b", defaultBaseURL, "Base URL for shortened links")
-	fileStoragePath = flagSet.String("f", defaultFileStoragePath, "Path to file storage for URLs")
-	databaseDSN = flagSet.String("d", defaultDatabaseDSN, "PostgreSQL connection string")
-	auditFile = flagSet.String("audit-file", defaultAuditFile, "Path to audit log file")
-	auditURL = flagSet.String("audit-url", defaultAuditURL, "Remote audit receiver URL")
-	enableHTTPS = flagSet.Bool("s", false, "Enable HTTPS server")
-	flagSet.StringVar(&configPath, "c", "", "Path to JSON config file")
-	flagSet.StringVar(&configPath, "config", "", "Path to JSON config file")
+func registerFlags(flagSet *flag.FlagSet) *flagValues {
+	values := &flagValues{}
+	flagSet.StringVar(&values.serverAddr, "a", defaultServerAddr, "HTTP server address")
+	flagSet.StringVar(&values.baseURL, "b", defaultBaseURL, "Base URL for shortened links")
+	flagSet.StringVar(&values.fileStoragePath, "f", defaultFileStoragePath, "Path to file storage for URLs")
+	flagSet.StringVar(&values.databaseDSN, "d", defaultDatabaseDSN, "PostgreSQL connection string")
+	flagSet.StringVar(&values.auditFile, "audit-file", defaultAuditFile, "Path to audit log file")
+	flagSet.StringVar(&values.auditURL, "audit-url", defaultAuditURL, "Remote audit receiver URL")
+	flagSet.BoolVar(&values.enableHTTPS, "s", false, "Enable HTTPS server")
+	flagSet.StringVar(&values.configPath, "c", "", "Path to JSON config file")
+	flagSet.StringVar(&values.configPath, "config", "", "Path to JSON config file")
+	return values
 }
 
 // Config содержит настройки запуска сервера сокращения ссылок.
@@ -73,37 +70,42 @@ type fileConfig struct {
 	EnableHTTPS     *bool   `json:"enable_https"`
 }
 
-// Load читает конфигурацию из переменных окружения, флагов командной строки и JSON-файла.
+// Load читает конфигурацию из переменных окружения, переданного набора флагов и JSON-файла.
 // Приоритет значений: переменные окружения, флаги, файл конфигурации, значения по умолчанию.
-func Load() *Config {
-	flag.Parse()
+func Load(flagSet *flag.FlagSet) (*Config, error) {
+	values := registerFlags(flagSet)
+	if !flagSet.Parsed() {
+		if err := flagSet.Parse(os.Args[1:]); err != nil {
+			return nil, fmt.Errorf("parse flags: %w", err)
+		}
+	}
 
-	flagSet := make(map[string]bool)
-	flag.Visit(func(f *flag.Flag) {
-		flagSet[f.Name] = true
+	explicitFlags := make(map[string]bool)
+	flagSet.Visit(func(f *flag.Flag) {
+		explicitFlags[f.Name] = true
 	})
 
 	fileCfg := fileConfig{}
-	if path := resolveConfigPath(flagSet); path != "" {
+	if path := resolveConfigPath(explicitFlags, values.configPath); path != "" {
 		var err error
 		fileCfg, err = loadFileConfig(path)
 		if err != nil {
-			panic(err)
+			return nil, fmt.Errorf("load config file: %w", err)
 		}
 	}
 
 	return &Config{
-		ServerAddr:      resolve("SERVER_ADDRESS", *serverAddr, flagSet["a"], fileCfg.ServerAddr, defaultServerAddr),
-		BaseURL:         resolve("BASE_URL", *baseURL, flagSet["b"], fileCfg.BaseURL, defaultBaseURL),
-		FileStoragePath: resolve("FILE_STORAGE_PATH", *fileStoragePath, flagSet["f"], fileCfg.FileStoragePath, defaultFileStoragePath),
-		DatabaseDSN:     resolve("DATABASE_DSN", *databaseDSN, flagSet["d"], fileCfg.DatabaseDSN, defaultDatabaseDSN),
-		AuditFile:       resolve("AUDIT_FILE", *auditFile, flagSet["audit-file"], fileCfg.AuditFile, defaultAuditFile),
-		AuditURL:        resolve("AUDIT_URL", *auditURL, flagSet["audit-url"], fileCfg.AuditURL, defaultAuditURL),
-		EnableHTTPS:     resolveBool("ENABLE_HTTPS", *enableHTTPS, flagSet["s"], fileCfg.EnableHTTPS, false),
-	}
+		ServerAddr:      resolve("SERVER_ADDRESS", values.serverAddr, explicitFlags["a"], fileCfg.ServerAddr, defaultServerAddr),
+		BaseURL:         resolve("BASE_URL", values.baseURL, explicitFlags["b"], fileCfg.BaseURL, defaultBaseURL),
+		FileStoragePath: resolve("FILE_STORAGE_PATH", values.fileStoragePath, explicitFlags["f"], fileCfg.FileStoragePath, defaultFileStoragePath),
+		DatabaseDSN:     resolve("DATABASE_DSN", values.databaseDSN, explicitFlags["d"], fileCfg.DatabaseDSN, defaultDatabaseDSN),
+		AuditFile:       resolve("AUDIT_FILE", values.auditFile, explicitFlags["audit-file"], fileCfg.AuditFile, defaultAuditFile),
+		AuditURL:        resolve("AUDIT_URL", values.auditURL, explicitFlags["audit-url"], fileCfg.AuditURL, defaultAuditURL),
+		EnableHTTPS:     resolveBool("ENABLE_HTTPS", values.enableHTTPS, explicitFlags["s"], fileCfg.EnableHTTPS, false),
+	}, nil
 }
 
-func resolveConfigPath(flagSet map[string]bool) string {
+func resolveConfigPath(flagSet map[string]bool, configPath string) string {
 	if env, ok := os.LookupEnv("CONFIG"); ok {
 		return env
 	}
@@ -143,7 +145,7 @@ func resolve(envKey, flagVal string, flagExplicit bool, configVal *string, defau
 func resolveBool(envKey string, flagVal, flagExplicit bool, configVal *bool, defaultVal bool) bool {
 	if env, ok := os.LookupEnv(envKey); ok {
 		if env == "" {
-			return true
+			return defaultVal
 		}
 		parsed, err := strconv.ParseBool(env)
 		if err != nil {

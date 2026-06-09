@@ -11,7 +11,7 @@ import (
 )
 
 func TestShortenCreatesURLAndReturnsExistingConflict(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := repository.NewMemoryRepository()
 	shortener := NewShortener(repo, "http://localhost:8080")
 
@@ -45,7 +45,7 @@ func TestShortenRejectsInvalidInput(t *testing.T) {
 }
 
 func TestShortenBatchAndGetUserURLs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	shortener := NewShortener(repository.NewMemoryRepository(), "http://localhost:8080")
 
 	got, err := shortener.ShortenBatch(ctx, []BatchInput{
@@ -159,6 +159,18 @@ func TestCloseFlushesPendingDeletes(t *testing.T) {
 
 	if !reflect.DeepEqual(repo.deleted["user1"], []string{"a", "b"}) {
 		t.Fatalf("deleted for user1 = %#v, want [a b]", repo.deleted["user1"])
+	}
+}
+
+func TestDeleteUserURLsAfterCloseIsIgnored(t *testing.T) {
+	repo := &stubRepo{deleted: make(map[string][]string)}
+	shortener := NewShortener(repo, "http://localhost:8080")
+
+	shortener.Close()
+	shortener.DeleteUserURLs([]string{"late"}, "user1")
+
+	if len(repo.deleted) != 0 {
+		t.Fatalf("deleted after close = %#v, want empty", repo.deleted)
 	}
 }
 

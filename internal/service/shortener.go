@@ -37,6 +37,8 @@ type Shortener struct {
 	repo           repository.URLRepository
 	shortURLPrefix string
 	delCh          chan deleteTask
+	closeMu        sync.Mutex
+	closed         bool
 	enqueueWG      sync.WaitGroup
 	workerWG       sync.WaitGroup
 	closeOnce      sync.Once
@@ -226,7 +228,14 @@ func (s *Shortener) GetOriginal(ctx context.Context, id string) (string, error) 
 
 // DeleteUserURLs асинхронно помечает короткие ссылки пользователя как удалённые.
 func (s *Shortener) DeleteUserURLs(shortIDs []string, userID string) {
+	s.closeMu.Lock()
+	if s.closed {
+		s.closeMu.Unlock()
+		return
+	}
 	s.enqueueWG.Add(1)
+	s.closeMu.Unlock()
+
 	go func() {
 		defer s.enqueueWG.Done()
 		for _, task := range generateDeleteTasks(shortIDs, userID) {
@@ -238,6 +247,10 @@ func (s *Shortener) DeleteUserURLs(shortIDs []string, userID string) {
 // Close дожидается всех запланированных удалений и сбрасывает последний батч.
 func (s *Shortener) Close() {
 	s.closeOnce.Do(func() {
+		s.closeMu.Lock()
+		s.closed = true
+		s.closeMu.Unlock()
+
 		s.enqueueWG.Wait()
 		close(s.delCh)
 		s.workerWG.Wait()

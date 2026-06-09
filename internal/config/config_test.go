@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,9 +19,12 @@ func TestLoadReadsJSONConfig(t *testing.T) {
 		"audit_url": "http://audit.local/events",
 		"enable_https": true
 	}`)
-	resetFlags(t, "-c", path)
+	flagSet := resetFlags(t, "-c", path)
 
-	cfg := Load()
+	cfg, err := Load(flagSet)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
 
 	if cfg.ServerAddr != "localhost:9090" {
 		t.Fatalf("ServerAddr = %q, want %q", cfg.ServerAddr, "localhost:9090")
@@ -54,7 +58,7 @@ func TestLoadGivesPriorityToFlagsAndEnvironment(t *testing.T) {
 		"database_dsn": "from-config-dsn",
 		"enable_https": false
 	}`)
-	resetFlags(t,
+	flagSet := resetFlags(t,
 		"-c", path,
 		"-a", "from-flag:8080",
 		"-b", "http://from-flag",
@@ -65,7 +69,10 @@ func TestLoadGivesPriorityToFlagsAndEnvironment(t *testing.T) {
 	t.Setenv("SERVER_ADDRESS", "from-env:8080")
 	t.Setenv("ENABLE_HTTPS", "false")
 
-	cfg := Load()
+	cfg, err := Load(flagSet)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
 
 	if cfg.ServerAddr != "from-env:8080" {
 		t.Fatalf("ServerAddr = %q, want env value", cfg.ServerAddr)
@@ -90,9 +97,12 @@ func TestLoadReadsConfigPathFromLongFlagAndEnvironment(t *testing.T) {
 	envPath := writeConfigFile(t, `{"server_address": "from-env-config:8080"}`)
 
 	t.Run("long flag", func(t *testing.T) {
-		resetFlags(t, "-config", flagPath)
+		flagSet := resetFlags(t, "-config", flagPath)
 
-		cfg := Load()
+		cfg, err := Load(flagSet)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
 
 		if cfg.ServerAddr != "from-long-flag:8080" {
 			t.Fatalf("ServerAddr = %q, want long flag config value", cfg.ServerAddr)
@@ -100,10 +110,13 @@ func TestLoadReadsConfigPathFromLongFlagAndEnvironment(t *testing.T) {
 	})
 
 	t.Run("environment", func(t *testing.T) {
-		resetFlags(t, "-config", flagPath)
+		flagSet := resetFlags(t, "-config", flagPath)
 		t.Setenv("CONFIG", envPath)
 
-		cfg := Load()
+		cfg, err := Load(flagSet)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
 
 		if cfg.ServerAddr != "from-env-config:8080" {
 			t.Fatalf("ServerAddr = %q, want env config value", cfg.ServerAddr)
@@ -111,12 +124,28 @@ func TestLoadReadsConfigPathFromLongFlagAndEnvironment(t *testing.T) {
 	})
 }
 
-func resetFlags(t *testing.T, args ...string) {
+func TestLoadReturnsConfigFileError(t *testing.T) {
+	clearConfigEnv(t)
+	flagSet := resetFlags(t, "-c", filepath.Join(t.TempDir(), "missing.json"))
+
+	cfg, err := Load(flagSet)
+
+	if err == nil {
+		t.Fatal("Load() error = nil, want error")
+	}
+	if cfg != nil {
+		t.Fatalf("Load() config = %#v, want nil", cfg)
+	}
+	if !strings.Contains(err.Error(), "load config file") {
+		t.Fatalf("Load() error = %q, want config file context", err.Error())
+	}
+}
+
+func resetFlags(t *testing.T, args ...string) *flag.FlagSet {
 	t.Helper()
 
-	flag.CommandLine = flag.NewFlagSet("shortener", flag.ContinueOnError)
-	registerFlags(flag.CommandLine)
 	os.Args = append([]string{"shortener"}, args...)
+	return flag.NewFlagSet("shortener", flag.ContinueOnError)
 }
 
 func clearConfigEnv(t *testing.T) {

@@ -8,14 +8,15 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"time"
+
+	"go.uber.org/zap"
 )
 
-func listenAndServe(srv *http.Server, enableHTTPS bool) error {
+func listenAndServe(srv *http.Server, enableHTTPS bool, logger *zap.Logger) error {
 	if !enableHTTPS {
 		return srv.ListenAndServe()
 	}
@@ -30,7 +31,7 @@ func listenAndServe(srv *http.Server, enableHTTPS bool) error {
 		return err
 	}
 
-	log.Printf("HTTPS enabled")
+	logger.Info("HTTPS enabled")
 	return srv.Serve(listener)
 }
 

@@ -11,7 +11,7 @@ import (
 )
 
 func TestMemoryRepositorySaveGetAndDelete(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := NewMemoryRepository()
 
 	if err := repo.Save(ctx, "short1", "https://example.com/1", "user1"); err != nil {
@@ -58,7 +58,7 @@ func TestMemoryRepositorySaveGetAndDelete(t *testing.T) {
 }
 
 func TestMemoryRepositoryConflictsAndValidation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := NewMemoryRepository()
 
 	if err := repo.Save(ctx, "short1", "https://example.com/1", "user1"); err != nil {
@@ -82,7 +82,7 @@ func TestMemoryRepositoryConflictsAndValidation(t *testing.T) {
 }
 
 func TestMemoryRepositorySaveBatchIsAtomic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := NewMemoryRepository()
 
 	entries := []BatchEntry{
@@ -106,7 +106,7 @@ func TestMemoryRepositorySaveBatchIsAtomic(t *testing.T) {
 }
 
 func TestFileRepositoryPersistsRecords(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "urls.jsonl")
 
 	repo, err := NewFileRepository(path)
@@ -145,7 +145,7 @@ func TestFileRepositoryPersistsRecords(t *testing.T) {
 }
 
 func TestFileRepositoryClosePersistsDeletedURLs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "urls.jsonl")
 
 	repo, err := NewFileRepository(path)
