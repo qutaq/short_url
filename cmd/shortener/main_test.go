@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -59,5 +61,65 @@ func TestNewAuditNotifier(t *testing.T) {
 
 	if _, _, err := newAuditNotifier(&config.Config{AuditURL: "://bad-url"}); err == nil {
 		t.Fatal("newAuditNotifier invalid remote URL error = nil, want error")
+	}
+}
+
+func TestNewTLSConfig(t *testing.T) {
+	tlsConfig, err := newTLSConfig()
+	if err != nil {
+		t.Fatalf("newTLSConfig: %v", err)
+	}
+	if tlsConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %d, want %d", tlsConfig.MinVersion, tls.VersionTLS12)
+	}
+	if len(tlsConfig.Certificates) != 1 {
+		t.Fatalf("certificates len = %d, want 1", len(tlsConfig.Certificates))
+	}
+}
+
+func TestNewSelfSignedCertificate(t *testing.T) {
+	cert, err := newSelfSignedCertificate()
+	if err != nil {
+		t.Fatalf("newSelfSignedCertificate: %v", err)
+	}
+	if len(cert.Certificate) == 0 {
+		t.Fatal("certificate chain is empty")
+	}
+	if cert.PrivateKey == nil {
+		t.Fatal("private key is nil")
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+	if got := parsed.Subject.Organization; len(got) != 1 || got[0] != "Yandex.Praktikum" {
+		t.Fatalf("organization = %v, want [Yandex.Praktikum]", got)
+	}
+	if err := parsed.VerifyHostname("localhost"); err != nil {
+		t.Fatalf("VerifyHostname localhost: %v", err)
+	}
+}
+
+func TestListenAndServeReturnsErrorForInvalidAddr(t *testing.T) {
+	tests := []struct {
+		name        string
+		enableHTTPS bool
+	}{
+		{name: "http", enableHTTPS: false},
+		{name: "https", enableHTTPS: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := &http.Server{
+				Addr:    "127.0.0.1:-1",
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+			}
+
+			if err := listenAndServe(srv, tt.enableHTTPS, zap.NewNop()); err == nil {
+				t.Fatal("listenAndServe error = nil, want error")
+			}
+		})
 	}
 }

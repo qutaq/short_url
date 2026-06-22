@@ -11,7 +11,7 @@ import (
 )
 
 func TestMemoryRepositorySaveGetAndDelete(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := NewMemoryRepository()
 
 	if err := repo.Save(ctx, "short1", "https://example.com/1", "user1"); err != nil {
@@ -58,7 +58,7 @@ func TestMemoryRepositorySaveGetAndDelete(t *testing.T) {
 }
 
 func TestMemoryRepositoryConflictsAndValidation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := NewMemoryRepository()
 
 	if err := repo.Save(ctx, "short1", "https://example.com/1", "user1"); err != nil {
@@ -82,7 +82,7 @@ func TestMemoryRepositoryConflictsAndValidation(t *testing.T) {
 }
 
 func TestMemoryRepositorySaveBatchIsAtomic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	repo := NewMemoryRepository()
 
 	entries := []BatchEntry{
@@ -106,7 +106,7 @@ func TestMemoryRepositorySaveBatchIsAtomic(t *testing.T) {
 }
 
 func TestFileRepositoryPersistsRecords(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "urls.jsonl")
 
 	repo, err := NewFileRepository(path)
@@ -141,6 +141,33 @@ func TestFileRepositoryPersistsRecords(t *testing.T) {
 	}
 	if !ok || id != "short2" {
 		t.Fatalf("GetByOriginalURL reloaded = %q, %v; want short2, true", id, ok)
+	}
+}
+
+func TestFileRepositoryClosePersistsDeletedURLs(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "urls.jsonl")
+
+	repo, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf("NewFileRepository: %v", err)
+	}
+	if err := repo.Save(ctx, "short1", "https://example.com/1", "user1"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := repo.DeleteUserURLs(ctx, []string{"short1"}, "user1"); err != nil {
+		t.Fatalf("DeleteUserURLs: %v", err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reloaded, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf("NewFileRepository reload: %v", err)
+	}
+	if _, err := reloaded.Get(ctx, "short1"); !errors.Is(err, ErrDeleted) {
+		t.Fatalf("Get deleted reloaded error = %v, want %v", err, ErrDeleted)
 	}
 }
 

@@ -15,6 +15,7 @@ type urlRecord struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id,omitempty"`
+	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
 // FileRepository хранит записи URL в памяти и сохраняет их в JSONL-файл.
@@ -147,6 +148,13 @@ func (r *FileRepository) DeleteUserURLs(ctx context.Context, shortIDs []string, 
 	return nil
 }
 
+// Close сохраняет текущее состояние файлового репозитория в хранилище.
+func (r *FileRepository) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.flush()
+}
+
 // GetByOriginalURL ищет идентификатор короткой ссылки по исходному URL.
 func (r *FileRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
 	if err := ctx.Err(); err != nil {
@@ -208,8 +216,12 @@ func (r *FileRepository) load() error {
 func (r *FileRepository) applyRecord(rec urlRecord) {
 	r.data[rec.ShortURL] = rec.OriginalURL
 	r.reverse[rec.OriginalURL] = rec.ShortURL
+	r.owners[rec.ShortURL] = rec.UserID
 	if rec.UserID != "" {
 		r.userURLs[rec.UserID] = append(r.userURLs[rec.UserID], rec.ShortURL)
+	}
+	if rec.IsDeleted {
+		r.deleted[rec.ShortURL] = true
 	}
 	if n, err := strconv.Atoi(rec.UUID); err == nil && n >= r.nextUUID {
 		r.nextUUID = n + 1
@@ -242,6 +254,8 @@ func (r *FileRepository) flush() error {
 			UUID:        strconv.Itoa(i),
 			ShortURL:    shortURL,
 			OriginalURL: originalURL,
+			UserID:      r.owners[shortURL],
+			IsDeleted:   r.deleted[shortURL],
 		}
 		line, err := json.Marshal(rec)
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/qutaq/short_url/internal/repository"
@@ -36,6 +37,11 @@ type Shortener struct {
 	repo           repository.URLRepository
 	shortURLPrefix string
 	delCh          chan deleteTask
+	closeMu        sync.Mutex
+	closed         bool
+	enqueueWG      sync.WaitGroup
+	workerWG       sync.WaitGroup
+	closeOnce      sync.Once
 }
 
 // BatchInput описывает один URL в пакетном запросе на сокращение.
@@ -70,6 +76,7 @@ func NewShortener(repo repository.URLRepository, baseURL string) *Shortener {
 		shortURLPrefix: baseURL + "/",
 		delCh:          make(chan deleteTask, 1024),
 	}
+	s.workerWG.Add(1)
 	go s.runDeleteWorker()
 	return s
 }
@@ -221,26 +228,45 @@ func (s *Shortener) GetOriginal(ctx context.Context, id string) (string, error) 
 
 // DeleteUserURLs асинхронно помечает короткие ссылки пользователя как удалённые.
 func (s *Shortener) DeleteUserURLs(shortIDs []string, userID string) {
-	inputCh := generateDeleteTasks(shortIDs, userID)
+	s.closeMu.Lock()
+	if s.closed {
+		s.closeMu.Unlock()
+		return
+	}
+	s.enqueueWG.Add(1)
+	s.closeMu.Unlock()
+
 	go func() {
-		for task := range inputCh {
+		defer s.enqueueWG.Done()
+		for _, task := range generateDeleteTasks(shortIDs, userID) {
 			s.delCh <- task
 		}
 	}()
 }
 
-func generateDeleteTasks(shortIDs []string, userID string) <-chan deleteTask {
-	ch := make(chan deleteTask)
-	go func() {
-		defer close(ch)
-		for _, id := range shortIDs {
-			ch <- deleteTask{shortID: id, userID: userID}
-		}
-	}()
-	return ch
+// Close дожидается всех запланированных удалений и сбрасывает последний батч.
+func (s *Shortener) Close() {
+	s.closeOnce.Do(func() {
+		s.closeMu.Lock()
+		s.closed = true
+		s.closeMu.Unlock()
+
+		s.enqueueWG.Wait()
+		close(s.delCh)
+		s.workerWG.Wait()
+	})
+}
+
+func generateDeleteTasks(shortIDs []string, userID string) []deleteTask {
+	tasks := make([]deleteTask, 0, len(shortIDs))
+	for _, id := range shortIDs {
+		tasks = append(tasks, deleteTask{shortID: id, userID: userID})
+	}
+	return tasks
 }
 
 func (s *Shortener) runDeleteWorker() {
+	defer s.workerWG.Done()
 	const (
 		batchSize    = 100
 		flushTimeout = 5 * time.Second
@@ -252,7 +278,13 @@ func (s *Shortener) runDeleteWorker() {
 
 	for {
 		select {
-		case task := <-s.delCh:
+		case task, ok := <-s.delCh:
+			if !ok {
+				if len(buf) > 0 {
+					s.flushDeleteBatch(buf)
+				}
+				return
+			}
 			buf = append(buf, task)
 			if len(buf) >= batchSize {
 				s.flushDeleteBatch(buf)

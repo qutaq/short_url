@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/config"
@@ -35,13 +37,22 @@ var buildCommit = "N/A"
 func main() {
 	printBuildInfo()
 
-	cfg := config.Load()
-
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer logger.Sync()
+
+	if err := run(logger); err != nil {
+		logger.Fatal("Server failed", zap.Error(err))
+	}
+}
+
+func run(logger *zap.Logger) error {
+	cfg, err := config.Load(flag.CommandLine)
+	if err != nil {
+		logger.Fatal("failed to load config", zap.Error(err))
+	}
 
 	r := newRouter(logger)
 
@@ -50,14 +61,14 @@ func main() {
 		var err error
 		pool, err = pgxpool.New(context.Background(), cfg.DatabaseDSN)
 		if err != nil {
-			log.Fatal("failed to open database pool:", err)
+			logger.Fatal("failed to open database pool", zap.Error(err))
 		}
 		defer pool.Close()
 
 		sqlDB := stdlib.OpenDBFromPool(pool)
 		defer sqlDB.Close()
 		if err := runMigrations(sqlDB); err != nil {
-			log.Fatal("failed to run migrations:", err)
+			logger.Fatal("failed to run migrations", zap.Error(err))
 		}
 	}
 
@@ -68,7 +79,7 @@ func main() {
 	case cfg.FileStoragePath != "":
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
-			log.Fatal("failed to open file storage:", err)
+			logger.Fatal("failed to open file storage", zap.Error(err))
 		}
 		repo = fileRepo
 	default:
@@ -77,7 +88,7 @@ func main() {
 
 	auditor, auditObservers, err := newAuditNotifier(cfg)
 	if err != nil {
-		log.Fatal("failed to configure audit:", err)
+		logger.Fatal("failed to configure audit", zap.Error(err))
 	}
 	defer auditObservers.closeFileObserver()
 
@@ -92,28 +103,39 @@ func main() {
 	r.Delete("/api/user/urls", h.DeleteUserURLs)
 	r.Get("/{id}", h.GetRedirect)
 
-	log.Printf("Server starting at %s", cfg.ServerAddr)
+	logger.Info("Server starting", zap.String("address", cfg.ServerAddr))
 
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: r,
 	}
 
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
-		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
-	<-ctx.Done()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server shutdown: %v", err)
-	}
+	g, groupCtx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		if err := listenAndServe(srv, cfg.EnableHTTPS, logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
+		<-groupCtx.Done()
+		stop()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("server shutdown: %w", err)
+		}
+		return nil
+	})
+
+	err = g.Wait()
+	shortener.Close()
+	closeRepository(repo)
+	return err
 }
 
 func printBuildInfo() {
@@ -165,6 +187,18 @@ func newAuditNotifier(cfg *config.Config) (*audit.Notifier, *auditObservers, err
 	}
 
 	return audit.NewNotifier(observers...), auditObservers, nil
+}
+
+func closeRepository(repo repository.URLRepository) {
+	closer, ok := repo.(interface {
+		Close() error
+	})
+	if !ok {
+		return
+	}
+	if err := closer.Close(); err != nil {
+		log.Printf("failed to close repository: %v", err)
+	}
 }
 
 func runMigrations(db *sql.DB) error {
