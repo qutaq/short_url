@@ -111,17 +111,22 @@ func run(logger *zap.Logger) error {
 
 	logger.Info("Server starting", zap.String("address", cfg.ServerAddr))
 
+	listener, err := newListener(cfg.ServerAddr, cfg.EnableHTTPS, logger)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+
 	srv := &http.Server{
-		Addr:    cfg.ServerAddr,
 		Handler: r,
 	}
+	grpcServer := newGRPCServer(h)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	g, groupCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		if err := listenAndServe(srv, cfg.EnableHTTPS, logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := serveMultiplexed(listener, srv, grpcServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil
@@ -130,11 +135,14 @@ func run(logger *zap.Logger) error {
 		<-groupCtx.Done()
 		stop()
 
+		grpcServer.GracefulStop()
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)
 		}
+		_ = listener.Close()
 		return nil
 	})
 
