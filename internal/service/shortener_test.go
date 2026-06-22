@@ -215,3 +215,7 @@ func (r *stubRepo) DeleteUserURLs(_ context.Context, shortIDs []string, userID s
 	r.deleted[userID] = append(r.deleted[userID], shortIDs...)
 	return nil
 }
+
+func (r *stubRepo) GetStats(context.Context) (repository.Stats, error) {
+	return repository.Stats{}, nil
+}

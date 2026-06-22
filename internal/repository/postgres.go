@@ -166,3 +166,19 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID string) (
 	}
 	return pairs, rows.Err()
 }
+
+// GetStats возвращает количество сокращённых URL и пользователей в PostgreSQL.
+func (r *PostgresRepository) GetStats(ctx context.Context) (Stats, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var stats Stats
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM urls`).Scan(&stats.URLs); err != nil {
+		return Stats{}, err
+	}
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(DISTINCT user_id) FROM urls WHERE user_id <> ''`).Scan(&stats.Users); err != nil {
+		return Stats{}, err
+	}
+	return stats, nil
+}

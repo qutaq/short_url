@@ -15,6 +15,7 @@ import (
 
 	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/auth"
+	"github.com/qutaq/short_url/internal/middleware"
 	"github.com/qutaq/short_url/internal/service"
 )
 
@@ -274,6 +275,33 @@ func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request
 
 	h.shortener.DeleteUserURLs(ids, userID)
 	w.WriteHeader(http.StatusAccepted)
+}
+
+type internalStatsResponse struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
+// GetInternalStats возвращает обработчик GET /api/internal/stats с проверкой доверенной подсети.
+func GetInternalStats(shortener *service.Shortener, checker *middleware.TrustedSubnetChecker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !checker.Allowed(r) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
+		stats, err := shortener.GetStats(r.Context())
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(internalStatsResponse{
+			URLs:  stats.URLs,
+			Users: stats.Users,
+		})
+	}
 }
 
 // PingDB возвращает обработчик, проверяющий подключение к PostgreSQL.

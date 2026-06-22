@@ -15,6 +15,7 @@ const (
 	defaultDatabaseDSN     = ""
 	defaultAuditFile       = ""
 	defaultAuditURL        = ""
+	defaultTrustedSubnet   = ""
 )
 
 type flagValues struct {
@@ -25,6 +26,7 @@ type flagValues struct {
 	auditFile       string
 	auditURL        string
 	enableHTTPS     bool
+	trustedSubnet   string
 	configPath      string
 }
 
@@ -37,6 +39,7 @@ func registerFlags(flagSet *flag.FlagSet) *flagValues {
 	flagSet.StringVar(&values.auditFile, "audit-file", defaultAuditFile, "Path to audit log file")
 	flagSet.StringVar(&values.auditURL, "audit-url", defaultAuditURL, "Remote audit receiver URL")
 	flagSet.BoolVar(&values.enableHTTPS, "s", false, "Enable HTTPS server")
+	flagSet.StringVar(&values.trustedSubnet, "t", defaultTrustedSubnet, "Trusted subnet CIDR for internal stats access")
 	flagSet.StringVar(&values.configPath, "c", "", "Path to JSON config file")
 	flagSet.StringVar(&values.configPath, "config", "", "Path to JSON config file")
 	return values
@@ -58,6 +61,8 @@ type Config struct {
 	AuditURL string
 	// EnableHTTPS включает запуск веб-сервера по HTTPS.
 	EnableHTTPS bool
+	// TrustedSubnet содержит CIDR доверенной подсети для доступа к /api/internal/stats.
+	TrustedSubnet string
 }
 
 type fileConfig struct {
@@ -68,6 +73,7 @@ type fileConfig struct {
 	AuditFile       *string `json:"audit_file"`
 	AuditURL        *string `json:"audit_url"`
 	EnableHTTPS     *bool   `json:"enable_https"`
+	TrustedSubnet   *string `json:"trusted_subnet"`
 }
 
 // Load читает конфигурацию из переменных окружения, переданного набора флагов и JSON-файла.
@@ -102,6 +108,7 @@ func Load(flagSet *flag.FlagSet) (*Config, error) {
 		AuditFile:       resolve("AUDIT_FILE", values.auditFile, explicitFlags["audit-file"], fileCfg.AuditFile, defaultAuditFile),
 		AuditURL:        resolve("AUDIT_URL", values.auditURL, explicitFlags["audit-url"], fileCfg.AuditURL, defaultAuditURL),
 		EnableHTTPS:     resolveBool("ENABLE_HTTPS", values.enableHTTPS, explicitFlags["s"], fileCfg.EnableHTTPS, false),
+		TrustedSubnet:   resolve("TRUSTED_SUBNET", values.trustedSubnet, explicitFlags["t"], fileCfg.TrustedSubnet, defaultTrustedSubnet),
 	}, nil
 }
 

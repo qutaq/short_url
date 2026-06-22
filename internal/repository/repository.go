@@ -12,6 +12,14 @@ type BatchEntry struct {
 	UserID string
 }
 
+// Stats содержит агрегированную статистику хранилища URL.
+type Stats struct {
+	// URLs содержит общее количество сокращённых URL.
+	URLs int
+	// Users содержит количество уникальных пользователей.
+	Users int
+}
+
 // URLPair содержит сохранённый идентификатор короткой ссылки и исходный URL.
 type URLPair struct {
 	// ShortID содержит сохранённый идентификатор короткой ссылки.
@@ -34,4 +42,6 @@ type URLRepository interface {
 	GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error)
 	// DeleteUserURLs помечает URL, принадлежащие пользователю, как удалённые.
 	DeleteUserURLs(ctx context.Context, shortIDs []string, userID string) error
+	// GetStats возвращает количество сокращённых URL и пользователей в хранилище.
+	GetStats(ctx context.Context) (Stats, error)
 }
