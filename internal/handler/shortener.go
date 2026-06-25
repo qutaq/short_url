@@ -61,6 +61,8 @@ type userURLResponse struct {
 
 func statusFromError(err error) (code int, body string) {
 	switch {
+	case errors.Is(err, auth.ErrNoUserID):
+		return http.StatusUnauthorized, "Unauthorized"
 	case errors.Is(err, service.ErrDeleted):
 		return http.StatusGone, "Gone"
 	case errors.Is(err, service.ErrNotFound):
@@ -184,9 +186,7 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	userID, _ := auth.UserIDFromContext(r.Context())
-
-	results, err := h.facade.Shortener().ShortenBatch(r.Context(), items, userID)
+	results, err := h.facade.ShortenBatch(r.Context(), items)
 	if err != nil {
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
@@ -209,14 +209,10 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 // GetUserURLs обрабатывает запросы GET /api/user/urls и возвращает URL,
 // принадлежащие аутентифицированному пользователю.
 func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.UserIDFromContext(r.Context()); !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	urls, err := h.facade.ListUserURLs(r.Context())
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
 		return
 	}
 	if len(urls) == 0 {
@@ -239,12 +235,6 @@ func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 // DeleteUserURLs обрабатывает запросы DELETE /api/user/urls и планирует удаление
 // URL, принадлежащих аутентифицированному пользователю.
 func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, ok := auth.UserIDFromContext(r.Context())
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -257,7 +247,11 @@ func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.facade.Shortener().DeleteUserURLs(ids, userID)
+	if err := h.facade.DeleteUserURLs(r.Context(), ids); err != nil {
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 }
 

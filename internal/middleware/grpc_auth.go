@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/qutaq/short_url/internal/auth"
+	pb "github.com/qutaq/short_url/pkg/shortenerpb"
 )
 
 const authorizationMetadataKey = "authorization"
@@ -28,7 +29,7 @@ func GRPCAuthUnaryInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerI
 
 // RequireAuthUnaryInterceptor требует наличия идентификатора пользователя в контексте.
 func RequireAuthUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	if info != nil && info.FullMethod == "/shortener.ShortenerService/ListUserURLs" {
+	if info != nil && info.FullMethod == pb.ShortenerService_ListUserURLs_FullMethodName {
 		if _, ok := auth.UserIDFromContext(ctx); !ok {
 			return nil, status.Error(codes.Unauthenticated, "unauthorized")
 		}

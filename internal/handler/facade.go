@@ -81,3 +81,22 @@ func (f *ShortenerFacade) ListUserURLs(ctx context.Context) ([]service.UserURLOu
 	}
 	return f.shortener.GetUserURLs(ctx, userID)
 }
+
+// ShortenBatch сохраняет несколько URL для аутентифицированного пользователя.
+func (f *ShortenerFacade) ShortenBatch(ctx context.Context, items []service.BatchInput) ([]service.BatchOutput, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return nil, auth.ErrNoUserID
+	}
+	return f.shortener.ShortenBatch(ctx, items, userID)
+}
+
+// DeleteUserURLs асинхронно помечает короткие ссылки пользователя как удалённые.
+func (f *ShortenerFacade) DeleteUserURLs(ctx context.Context, shortIDs []string) error {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return auth.ErrNoUserID
+	}
+	f.shortener.DeleteUserURLs(shortIDs, userID)
+	return nil
+}

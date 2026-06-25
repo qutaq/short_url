@@ -173,11 +173,12 @@ func (r *PostgresRepository) GetStats(ctx context.Context) (Stats, error) {
 	defer cancel()
 
 	var stats Stats
-	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM urls`).Scan(&stats.URLs); err != nil {
-		return Stats{}, err
-	}
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(DISTINCT user_id) FROM urls WHERE user_id <> ''`).Scan(&stats.Users); err != nil {
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(DISTINCT user_id) FILTER (WHERE user_id <> '')
+		FROM urls`).Scan(&stats.URLs, &stats.Users)
+	if err != nil {
 		return Stats{}, err
 	}
 	return stats, nil
