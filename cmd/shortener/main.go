@@ -93,12 +93,13 @@ func run(logger *zap.Logger) error {
 	defer auditObservers.closeFileObserver()
 
 	shortener := service.NewShortener(repo, cfg.BaseURL)
-	h := handler.NewShortenerHandler(shortener, auditor)
 
 	trustedSubnetChecker, err := middleware.NewTrustedSubnetChecker(cfg.TrustedSubnet)
 	if err != nil {
 		logger.Fatal("invalid trusted_subnet", zap.Error(err))
 	}
+
+	h := handler.NewShortenerHandler(shortener, trustedSubnetChecker, auditor)
 
 	r.Get("/ping", handler.PingDB(pool))
 	r.Post("/", h.PostShorten)
@@ -107,7 +108,7 @@ func run(logger *zap.Logger) error {
 	r.Get("/api/user/urls", h.GetUserURLs)
 	r.Delete("/api/user/urls", h.DeleteUserURLs)
 	r.Get("/{id}", h.GetRedirect)
-	r.Get("/api/internal/stats", handler.GetInternalStats(shortener, trustedSubnetChecker))
+	r.Get("/api/internal/stats", h.GetInternalStats)
 
 	logger.Info("Server starting", zap.String("address", cfg.ServerAddr))
 

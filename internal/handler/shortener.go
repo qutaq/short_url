@@ -30,13 +30,18 @@ type shortenResponse struct {
 // ShortenerHandler предоставляет HTTP-обработчики для сокращения, раскрытия,
 // просмотра и удаления URL.
 type ShortenerHandler struct {
-	facade *ShortenerFacade
+	facade               *ShortenerFacade
+	trustedSubnetChecker *middleware.TrustedSubnetChecker
 }
 
 // NewShortenerHandler создаёт ShortenerHandler на основе shortener.
 // Первый необязательный auditor получает события успешного сокращения и перехода.
-func NewShortenerHandler(shortener *service.Shortener, auditors ...audit.Observer) *ShortenerHandler {
-	return &ShortenerHandler{facade: NewShortenerFacade(shortener, auditors...)}
+// checker используется для защиты внутренних эндпоинтов; может быть nil.
+func NewShortenerHandler(shortener *service.Shortener, checker *middleware.TrustedSubnetChecker, auditors ...audit.Observer) *ShortenerHandler {
+	return &ShortenerHandler{
+		facade:               NewShortenerFacade(shortener, auditors...),
+		trustedSubnetChecker: checker,
+	}
 }
 
 // Facade возвращает общий фасад бизнес-логики для HTTP- и gRPC-обработчиков.
@@ -260,26 +265,24 @@ type internalStatsResponse struct {
 	Users int `json:"users"`
 }
 
-// GetInternalStats возвращает обработчик GET /api/internal/stats с проверкой доверенной подсети.
-func GetInternalStats(shortener *service.Shortener, checker *middleware.TrustedSubnetChecker) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !checker.Allowed(r) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-
-		stats, err := shortener.GetStats(r.Context())
-		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(internalStatsResponse{
-			URLs:  stats.URLs,
-			Users: stats.Users,
-		})
+// GetInternalStats обрабатывает запросы GET /api/internal/stats с проверкой доверенной подсети.
+func (h *ShortenerHandler) GetInternalStats(w http.ResponseWriter, r *http.Request) {
+	if h.trustedSubnetChecker == nil || !h.trustedSubnetChecker.Allowed(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
 	}
+
+	stats, err := h.facade.GetStats(r.Context())
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(internalStatsResponse{
+		URLs:  stats.URLs,
+		Users: stats.Users,
+	})
 }
 
 // PingDB возвращает обработчик, проверяющий подключение к PostgreSQL.

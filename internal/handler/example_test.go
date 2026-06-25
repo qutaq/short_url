@@ -21,7 +21,7 @@ const exampleBaseURL = "http://localhost:8080"
 func setupExampleRouter() (*chi.Mux, *repository.MemoryRepository) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, exampleBaseURL)
-	h := handler.NewShortenerHandler(svc)
+	h := handler.NewShortenerHandler(svc, nil)
 
 	r := chi.NewRouter()
 	r.Use(middleware.AuthMiddleware)

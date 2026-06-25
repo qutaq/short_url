@@ -7,6 +7,7 @@ import (
 
 	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/auth"
+	"github.com/qutaq/short_url/internal/repository"
 	"github.com/qutaq/short_url/internal/service"
 )
 
@@ -99,4 +100,9 @@ func (f *ShortenerFacade) DeleteUserURLs(ctx context.Context, shortIDs []string)
 	}
 	f.shortener.DeleteUserURLs(shortIDs, userID)
 	return nil
+}
+
+// GetStats возвращает количество сокращённых URL и пользователей.
+func (f *ShortenerFacade) GetStats(ctx context.Context) (repository.Stats, error) {
+	return f.shortener.GetStats(ctx)
 }

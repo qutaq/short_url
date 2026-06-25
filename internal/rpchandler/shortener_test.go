@@ -27,7 +27,7 @@ func startTestGRPCServer(t *testing.T) (pb.ShortenerServiceClient, func()) {
 
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, testBaseURL)
-	h := handler.NewShortenerHandler(svc)
+	h := handler.NewShortenerHandler(svc, nil)
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
