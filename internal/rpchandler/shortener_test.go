@@ -27,7 +27,7 @@ func startTestGRPCServer(t *testing.T) (pb.ShortenerServiceClient, func()) {
 
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, testBaseURL)
-	h := handler.NewShortenerHandler(svc, nil)
+	h := handler.NewShortenerHandler(svc, nil, nil)
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
@@ -81,6 +81,33 @@ func TestGRPCShortenAndExpandURL(t *testing.T) {
 	}
 	if expandResp.GetResult() != "https://example.com" {
 		t.Fatalf("ExpandURL result = %q, want %q", expandResp.GetResult(), "https://example.com")
+	}
+}
+
+func TestGRPCShortenURLConflict(t *testing.T) {
+	client, cleanup := startTestGRPCServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	const originalURL = "https://conflict.example.com"
+
+	first, err := client.ShortenURL(ctx, &pb.URLShortenRequest{Url: originalURL})
+	if err != nil {
+		t.Fatalf("first ShortenURL: %v", err)
+	}
+	if first.GetConflict() {
+		t.Fatal("first ShortenURL conflict = true, want false")
+	}
+
+	second, err := client.ShortenURL(ctx, &pb.URLShortenRequest{Url: originalURL})
+	if err != nil {
+		t.Fatalf("second ShortenURL: %v", err)
+	}
+	if !second.GetConflict() {
+		t.Fatal("second ShortenURL conflict = false, want true")
+	}
+	if second.GetResult() != first.GetResult() {
+		t.Fatalf("conflict result = %q, want %q", second.GetResult(), first.GetResult())
 	}
 }
 

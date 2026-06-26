@@ -11,10 +11,10 @@ type TrustedSubnetChecker struct {
 }
 
 // NewTrustedSubnetChecker создаёт проверку для CIDR trustedSubnet.
-// Пустое значение trustedSubnet запрещает доступ для любого запроса.
+// Пустое значение trustedSubnet возвращает nil — доступ запрещён для любого запроса.
 func NewTrustedSubnetChecker(trustedSubnet string) (*TrustedSubnetChecker, error) {
 	if trustedSubnet == "" {
-		return &TrustedSubnetChecker{}, nil
+		return nil, nil
 	}
 	_, network, err := net.ParseCIDR(trustedSubnet)
 	if err != nil {
@@ -25,7 +25,7 @@ func NewTrustedSubnetChecker(trustedSubnet string) (*TrustedSubnetChecker, error
 
 // Allowed возвращает true, если X-Real-IP запроса входит в доверенную подсеть.
 func (c *TrustedSubnetChecker) Allowed(r *http.Request) bool {
-	if c == nil || c.network == nil {
+	if c == nil {
 		return false
 	}
 	ip := net.ParseIP(r.Header.Get("X-Real-IP"))

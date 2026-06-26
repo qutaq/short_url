@@ -35,11 +35,11 @@ type ShortenerHandler struct {
 }
 
 // NewShortenerHandler создаёт ShortenerHandler на основе shortener.
-// Первый необязательный auditor получает события успешного сокращения и перехода.
+// auditor получает события успешного сокращения и перехода; может быть nil.
 // checker используется для защиты внутренних эндпоинтов; может быть nil.
-func NewShortenerHandler(shortener *service.Shortener, checker *middleware.TrustedSubnetChecker, auditors ...audit.Observer) *ShortenerHandler {
+func NewShortenerHandler(shortener *service.Shortener, checker *middleware.TrustedSubnetChecker, auditor audit.Observer) *ShortenerHandler {
 	return &ShortenerHandler{
-		facade:               NewShortenerFacade(shortener, auditors...),
+		facade:               NewShortenerFacade(shortener, auditor),
 		trustedSubnetChecker: checker,
 	}
 }
@@ -274,7 +274,8 @@ func (h *ShortenerHandler) GetInternalStats(w http.ResponseWriter, r *http.Reque
 
 	stats, err := h.facade.GetStats(r.Context())
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
 		return
 	}
 

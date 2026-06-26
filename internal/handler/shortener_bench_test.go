@@ -16,7 +16,7 @@ import (
 func setupBenchmarkHandler() http.Handler {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, testBaseURL)
-	h := NewShortenerHandler(svc, nil)
+	h := NewShortenerHandler(svc, nil, nil)
 
 	r := chi.NewRouter()
 	r.Post("/", h.PostShorten)

@@ -24,10 +24,10 @@ type ShortenerFacade struct {
 }
 
 // NewShortenerFacade создаёт фасад поверх сервиса сокращения ссылок.
-func NewShortenerFacade(shortener *service.Shortener, auditors ...audit.Observer) *ShortenerFacade {
-	auditor := audit.Observer(audit.NewNotifier())
-	if len(auditors) > 0 {
-		auditor = auditors[0]
+// Если auditor равен nil, используется Notifier без внешних наблюдателей.
+func NewShortenerFacade(shortener *service.Shortener, auditor audit.Observer) *ShortenerFacade {
+	if auditor == nil {
+		auditor = audit.NewNotifier()
 	}
 	return &ShortenerFacade{shortener: shortener, auditor: auditor}
 }
@@ -44,6 +44,7 @@ func (f *ShortenerFacade) ShortenURL(ctx context.Context, rawURL string) (Shorte
 		return ShortenResult{}, service.ErrInvalidInput
 	}
 
+	// ok намеренно игнорируется: авторизация для сокращения URL опциональна.
 	userID, _ := auth.UserIDFromContext(ctx)
 
 	shortURL, err := f.shortener.Shorten(ctx, rawURL, userID)
@@ -69,6 +70,7 @@ func (f *ShortenerFacade) ExpandURL(ctx context.Context, id string) (string, err
 		return "", err
 	}
 
+	// ok намеренно игнорируется: авторизация для перехода по ссылке опциональна.
 	userID, _ := auth.UserIDFromContext(ctx)
 	_ = f.auditor.Notify(ctx, audit.NewEvent(audit.ActionFollow, userID, originalURL))
 	return originalURL, nil

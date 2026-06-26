@@ -31,11 +31,10 @@ func (s *ShortenerServer) ShortenURL(ctx context.Context, req *pb.URLShortenRequ
 	if err != nil {
 		return nil, grpcStatusFromError(err)
 	}
-	resp := &pb.URLShortenResponse{Result: result.ShortURL}
-	if result.Conflict {
-		return resp, status.Error(codes.AlreadyExists, "url already exists")
-	}
-	return resp, nil
+	return &pb.URLShortenResponse{
+		Result:   result.ShortURL,
+		Conflict: result.Conflict,
+	}, nil
 }
 
 // ExpandURL возвращает исходный URL по идентификатору короткой ссылки.
@@ -76,7 +75,7 @@ func grpcStatusFromError(err error) error {
 	case errors.Is(err, service.ErrNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, service.ErrDeleted):
-		return status.Error(codes.NotFound, err.Error())
+		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, auth.ErrNoUserID):
 		return status.Error(codes.Unauthenticated, "unauthorized")
 	default:

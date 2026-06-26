@@ -18,6 +18,7 @@ message URLShortenRequest {
 
 message URLShortenResponse {
   string result = 1;
+  bool conflict = 2;
 }
 
 message URLExpandRequest {

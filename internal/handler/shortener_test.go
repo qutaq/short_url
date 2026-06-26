@@ -20,7 +20,7 @@ func setupHandler(t *testing.T) (http.Handler, *repository.MemoryRepository) {
 	t.Helper()
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, testBaseURL)
-	h := NewShortenerHandler(svc, nil)
+	h := NewShortenerHandler(svc, nil, nil)
 	r := chi.NewRouter()
 	r.Post("/", h.PostShorten)
 	r.Post("/api/shorten", h.PostShortenJSON)

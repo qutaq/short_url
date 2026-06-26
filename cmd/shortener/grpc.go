@@ -38,7 +38,12 @@ func serveMultiplexed(listener net.Listener, httpSrv *http.Server, grpcSrv *grpc
 	go func() { errCh <- mux.Serve() }()
 
 	err := <-errCh
-	if errors.Is(err, cmux.ErrListenerClosed) || errors.Is(err, cmux.ErrServerClosed) {
+	_ = listener.Close()
+	for range 2 {
+		<-errCh
+	}
+
+	if errors.Is(err, cmux.ErrListenerClosed) || errors.Is(err, cmux.ErrServerClosed) || errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
 	return err
