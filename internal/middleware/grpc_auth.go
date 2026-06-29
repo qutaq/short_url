@@ -12,13 +12,11 @@ import (
 	pb "github.com/qutaq/short_url/pkg/shortenerpb"
 )
 
-const authorizationMetadataKey = "authorization"
-
 // GRPCAuthUnaryInterceptor извлекает токен авторизации из metadata и сохраняет
 // идентификатор пользователя в контексте запроса.
 func GRPCAuthUnaryInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		if values := md.Get(authorizationMetadataKey); len(values) > 0 {
+		if values := md.Get(auth.AuthorizationMetadataKey); len(values) > 0 {
 			if userID, err := auth.VerifyToken(values[0]); err == nil {
 				ctx = auth.ContextWithUserID(ctx, userID)
 			}

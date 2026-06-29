@@ -1,7 +1,6 @@
 package rpchandler
 
 import (
-	"context"
 	"net"
 	"testing"
 
@@ -65,7 +64,7 @@ func TestGRPCShortenAndExpandURL(t *testing.T) {
 	client, cleanup := startTestGRPCServer(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	shortenResp, err := client.ShortenURL(ctx, &pb.URLShortenRequest{Url: "https://example.com"})
 	if err != nil {
 		t.Fatalf("ShortenURL: %v", err)
@@ -88,7 +87,7 @@ func TestGRPCShortenURLConflict(t *testing.T) {
 	client, cleanup := startTestGRPCServer(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	const originalURL = "https://conflict.example.com"
 
 	first, err := client.ShortenURL(ctx, &pb.URLShortenRequest{Url: originalURL})
@@ -115,7 +114,7 @@ func TestGRPCListUserURLsRequiresAuth(t *testing.T) {
 	client, cleanup := startTestGRPCServer(t)
 	defer cleanup()
 
-	_, err := client.ListUserURLs(context.Background(), &emptypb.Empty{})
+	_, err := client.ListUserURLs(t.Context(), &emptypb.Empty{})
 	if err == nil {
 		t.Fatal("ListUserURLs without auth error = nil, want error")
 	}
@@ -134,7 +133,7 @@ func TestGRPCListUserURLsReturnsSavedURLs(t *testing.T) {
 	}
 	token := auth.SignUserID(userID)
 
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", token))
+	ctx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs(auth.AuthorizationMetadataKey, token))
 	if _, err := client.ShortenURL(ctx, &pb.URLShortenRequest{Url: "https://grpc-user.example.com"}); err != nil {
 		t.Fatalf("ShortenURL: %v", err)
 	}

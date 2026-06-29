@@ -14,6 +14,9 @@ type contextKey string
 
 const userIDKey contextKey = "user_id"
 
+// AuthorizationMetadataKey — ключ metadata gRPC для передачи токена авторизации.
+const AuthorizationMetadataKey = "authorization"
+
 var secretKey = []byte("short-url-secret-key-2024")
 
 const userIDLen = 16

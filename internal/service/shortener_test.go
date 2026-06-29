@@ -33,9 +33,10 @@ func TestShortenCreatesURLAndReturnsExistingConflict(t *testing.T) {
 }
 
 func TestShortenRejectsInvalidInput(t *testing.T) {
+	ctx := t.Context()
 	shortener := NewShortener(repository.NewMemoryRepository(), "http://localhost:8080")
 
-	got, err := shortener.Shorten(context.Background(), "", "user1")
+	got, err := shortener.Shorten(ctx, "", "user1")
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("Shorten empty error = %v, want %v", err, ErrInvalidInput)
 	}
@@ -77,12 +78,13 @@ func TestShortenBatchAndGetUserURLs(t *testing.T) {
 }
 
 func TestShortenBatchRejectsInvalidInput(t *testing.T) {
+	ctx := t.Context()
 	shortener := NewShortener(repository.NewMemoryRepository(), "http://localhost:8080")
 
-	if got, err := shortener.ShortenBatch(context.Background(), nil, "user1"); !errors.Is(err, ErrInvalidInput) || got != nil {
+	if got, err := shortener.ShortenBatch(ctx, nil, "user1"); !errors.Is(err, ErrInvalidInput) || got != nil {
 		t.Fatalf("ShortenBatch empty = %#v, %v; want nil, %v", got, err, ErrInvalidInput)
 	}
-	if got, err := shortener.ShortenBatch(context.Background(), []BatchInput{{CorrelationID: "1"}}, "user1"); !errors.Is(err, ErrInvalidInput) || got != nil {
+	if got, err := shortener.ShortenBatch(ctx, []BatchInput{{CorrelationID: "1"}}, "user1"); !errors.Is(err, ErrInvalidInput) || got != nil {
 		t.Fatalf("ShortenBatch empty URL = %#v, %v; want nil, %v", got, err, ErrInvalidInput)
 	}
 }
@@ -100,7 +102,7 @@ func TestGetOriginalMapsRepositoryErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			shortener := NewShortener(&stubRepo{getErr: tt.repoErr}, "http://localhost:8080")
-			got, err := shortener.GetOriginal(context.Background(), "short1")
+			got, err := shortener.GetOriginal(t.Context(), "short1")
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("GetOriginal error = %v, want %v", err, tt.wantErr)
 			}
@@ -112,6 +114,7 @@ func TestGetOriginalMapsRepositoryErrors(t *testing.T) {
 }
 
 func TestGetUserURLsMapsRepositoryPairs(t *testing.T) {
+	ctx := t.Context()
 	shortener := NewShortener(&stubRepo{
 		urlPairs: []repository.URLPair{
 			{ShortID: "short1", OriginalURL: "https://example.com/1"},
@@ -119,7 +122,7 @@ func TestGetUserURLsMapsRepositoryPairs(t *testing.T) {
 		},
 	}, "http://localhost:8080")
 
-	got, err := shortener.GetUserURLs(context.Background(), "user1")
+	got, err := shortener.GetUserURLs(ctx, "user1")
 	if err != nil {
 		t.Fatalf("GetUserURLs: %v", err)
 	}
