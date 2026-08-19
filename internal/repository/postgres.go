@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
@@ -25,8 +24,6 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 // Save сохраняет одну запись короткой ссылки в PostgreSQL.
 func (r *PostgresRepository) Save(ctx context.Context, id, url, userID string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	if err := validateUserID(userID); err != nil {
 		return err
 	}
@@ -49,8 +46,6 @@ func (r *PostgresRepository) Save(ctx context.Context, id, url, userID string) e
 
 // SaveBatch сохраняет несколько записей коротких ссылок в одной транзакции.
 func (r *PostgresRepository) SaveBatch(ctx context.Context, entries []BatchEntry) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	for _, e := range entries {
 		if err := validateUserID(e.UserID); err != nil {
 			return err
@@ -83,9 +78,6 @@ func (r *PostgresRepository) SaveBatch(ctx context.Context, entries []BatchEntry
 
 // Get возвращает исходный URL по идентификатору короткой ссылки.
 func (r *PostgresRepository) Get(ctx context.Context, id string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	var originalURL string
 	var isDeleted bool
 	err := r.pool.QueryRow(ctx,
@@ -107,8 +99,6 @@ func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, shortIDs []stri
 	if len(shortIDs) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 
 	placeholders := make([]string, len(shortIDs))
 	args := make([]interface{}, 0, len(shortIDs)+1)
@@ -129,9 +119,6 @@ func (r *PostgresRepository) DeleteUserURLs(ctx context.Context, shortIDs []stri
 
 // GetByOriginalURL ищет идентификатор короткой ссылки по исходному URL.
 func (r *PostgresRepository) GetByOriginalURL(ctx context.Context, url string) (string, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	var shortID string
 	err := r.pool.QueryRow(ctx,
 		`SELECT short_id FROM urls WHERE original_url = $1`, url).Scan(&shortID)
@@ -146,9 +133,6 @@ func (r *PostgresRepository) GetByOriginalURL(ctx context.Context, url string) (
 
 // GetURLsByUser возвращает записи URL, созданные userID.
 func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID string) ([]URLPair, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	rows, err := r.pool.Query(ctx,
 		`SELECT short_id, original_url FROM urls WHERE user_id = $1`, userID)
 	if err != nil {
@@ -165,4 +149,18 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID string) (
 		pairs = append(pairs, p)
 	}
 	return pairs, rows.Err()
+}
+
+// GetStats возвращает количество сокращённых URL и пользователей в PostgreSQL.
+func (r *PostgresRepository) GetStats(ctx context.Context) (Stats, error) {
+	var stats Stats
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(DISTINCT user_id) FILTER (WHERE user_id <> '')
+		FROM urls`).Scan(&stats.URLs, &stats.Users)
+	if err != nil {
+		return Stats{}, err
+	}
+	return stats, nil
 }

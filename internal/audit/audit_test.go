@@ -34,13 +34,13 @@ func TestNotifierJoinsObserverErrors(t *testing.T) {
 		observerFunc(func(context.Context, Event) error { return errTwo }),
 	)
 
-	err := notifier.Notify(context.Background(), Event{})
+	err := notifier.Notify(t.Context(), Event{})
 	if !errors.Is(err, errOne) || !errors.Is(err, errTwo) {
 		t.Fatalf("Notify error = %v, want both observer errors", err)
 	}
 
 	emptyNotifier := NewNotifier()
-	if err := emptyNotifier.Notify(context.Background(), Event{}); err != nil {
+	if err := emptyNotifier.Notify(t.Context(), Event{}); err != nil {
 		t.Fatalf("empty notifier Notify error = %v, want nil", err)
 	}
 }
@@ -63,7 +63,7 @@ func TestNotifierDoesNotLetSlowObserverDelayOthers(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- notifier.Notify(context.Background(), Event{})
+		errCh <- notifier.Notify(t.Context(), Event{})
 	}()
 
 	waitForSignal(t, slowStarted, "slow observer to start")
@@ -99,7 +99,7 @@ func TestNotifierDoesNotLetBusyObserverBlockOthers(t *testing.T) {
 
 	firstErrCh := make(chan error, 1)
 	go func() {
-		firstErrCh <- notifier.Notify(context.Background(), Event{})
+		firstErrCh <- notifier.Notify(t.Context(), Event{})
 	}()
 
 	waitForSignal(t, slowStarted, "first slow observer to start")
@@ -107,7 +107,7 @@ func TestNotifierDoesNotLetBusyObserverBlockOthers(t *testing.T) {
 
 	secondErrCh := make(chan error, 1)
 	go func() {
-		secondErrCh <- notifier.Notify(context.Background(), Event{})
+		secondErrCh <- notifier.Notify(t.Context(), Event{})
 	}()
 
 	waitForSignal(t, fastNotified, "second fast observer to be notified")
@@ -146,7 +146,7 @@ func TestNotifierLimitsConcurrentObserverNotifications(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- notifier.Notify(context.Background(), Event{})
+			errCh <- notifier.Notify(t.Context(), Event{})
 		}()
 	}
 
@@ -185,7 +185,7 @@ func TestFileObserverWritesEvents(t *testing.T) {
 	defer observer.Close()
 
 	event := Event{Timestamp: 1, Action: ActionFollow, UserID: "user1", URL: "https://example.com"}
-	if err := observer.Notify(context.Background(), event); err != nil {
+	if err := observer.Notify(t.Context(), event); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 
@@ -201,7 +201,7 @@ func TestFileObserverWritesEvents(t *testing.T) {
 		t.Fatalf("stored event = %#v, want %#v", got, event)
 	}
 
-	cancelled, cancel := context.WithCancel(context.Background())
+	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := observer.Notify(cancelled, event); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Notify cancelled error = %v, want %v", err, context.Canceled)
@@ -229,7 +229,7 @@ func TestRemoteObserver(t *testing.T) {
 		t.Fatalf("NewRemoteObserver: %v", err)
 	}
 	event := Event{Timestamp: 1, Action: ActionShorten, URL: "https://example.com"}
-	if err := observer.Notify(context.Background(), event); err != nil {
+	if err := observer.Notify(t.Context(), event); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if got != event {
@@ -258,7 +258,7 @@ func TestRemoteObserverRetriesTransientFailures(t *testing.T) {
 		t.Fatalf("NewRemoteObserver: %v", err)
 	}
 	event := Event{Timestamp: 1, Action: ActionShorten, URL: "https://example.com"}
-	if err := observer.Notify(context.Background(), event); err != nil {
+	if err := observer.Notify(t.Context(), event); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if gotAttempts, want := attempts.Load(), int32(3); gotAttempts != want {
@@ -283,7 +283,7 @@ func TestRemoteObserverErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRemoteObserver: %v", err)
 	}
-	if err := observer.Notify(context.Background(), Event{}); err == nil {
+	if err := observer.Notify(t.Context(), Event{}); err == nil {
 		t.Fatal("Notify bad status error = nil, want error")
 	}
 }

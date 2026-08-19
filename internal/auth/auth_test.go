@@ -60,13 +60,13 @@ func TestUserIDContext(t *testing.T) {
 		t.Fatalf("UserIDFromContext empty context = %q, %v; want empty, false", got, ok)
 	}
 
-	ctx := ContextWithUserID(context.Background(), "user-1")
+	ctx := ContextWithUserID(t.Context(), "user-1")
 	got, ok := UserIDFromContext(ctx)
 	if !ok || got != "user-1" {
 		t.Fatalf("UserIDFromContext = %q, %v; want user-1, true", got, ok)
 	}
 
-	ctx = ContextWithUserID(context.Background(), "")
+	ctx = ContextWithUserID(t.Context(), "")
 	if got, ok := UserIDFromContext(ctx); ok || got != "" {
 		t.Fatalf("UserIDFromContext empty user = %q, %v; want empty, false", got, ok)
 	}

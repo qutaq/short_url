@@ -142,3 +142,16 @@ func (r *MemoryRepository) GetURLsByUser(ctx context.Context, userID string) ([]
 	}
 	return pairs, nil
 }
+
+// GetStats возвращает количество сокращённых URL и пользователей в памяти.
+func (r *MemoryRepository) GetStats(ctx context.Context) (Stats, error) {
+	if err := ctx.Err(); err != nil {
+		return Stats{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return Stats{
+		URLs:  len(r.data),
+		Users: len(r.userURLs),
+	}, nil
+}

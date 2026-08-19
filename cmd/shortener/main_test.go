@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"net/http"
@@ -45,7 +44,7 @@ func TestNewAuditNotifier(t *testing.T) {
 	if auditObservers.file == nil {
 		t.Fatal("newAuditNotifier file did not configure file observer")
 	}
-	if err := notifier.Notify(context.Background(), audit.Event{Timestamp: 1, Action: audit.ActionShorten, URL: "https://example.com"}); err != nil {
+	if err := notifier.Notify(t.Context(), audit.Event{Timestamp: 1, Action: audit.ActionShorten, URL: "https://example.com"}); err != nil {
 		t.Fatalf("Notify file observer: %v", err)
 	}
 	auditObservers.closeFileObserver()

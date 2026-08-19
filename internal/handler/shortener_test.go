@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +19,7 @@ func setupHandler(t *testing.T) (http.Handler, *repository.MemoryRepository) {
 	t.Helper()
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo, testBaseURL)
-	h := NewShortenerHandler(svc)
+	h := NewShortenerHandler(svc, nil, nil)
 	r := chi.NewRouter()
 	r.Post("/", h.PostShorten)
 	r.Post("/api/shorten", h.PostShortenJSON)
@@ -140,7 +139,7 @@ func TestGetRedirect_KnownID(t *testing.T) {
 
 	originalURL := "https://example.com/original"
 	id := "abc12345"
-	if err := repo.Save(context.Background(), id, originalURL, ""); err != nil {
+	if err := repo.Save(t.Context(), id, originalURL, ""); err != nil {
 		t.Fatalf("repo.Save: %v", err)
 	}
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/qutaq/short_url/internal/audit"
 	"github.com/qutaq/short_url/internal/auth"
+	"github.com/qutaq/short_url/internal/middleware"
 	"github.com/qutaq/short_url/internal/service"
 )
 
@@ -29,18 +30,23 @@ type shortenResponse struct {
 // ShortenerHandler предоставляет HTTP-обработчики для сокращения, раскрытия,
 // просмотра и удаления URL.
 type ShortenerHandler struct {
-	shortener *service.Shortener
-	auditor   audit.Observer
+	facade               *ShortenerFacade
+	trustedSubnetChecker *middleware.TrustedSubnetChecker
 }
 
 // NewShortenerHandler создаёт ShortenerHandler на основе shortener.
-// Первый необязательный auditor получает события успешного сокращения и перехода.
-func NewShortenerHandler(shortener *service.Shortener, auditors ...audit.Observer) *ShortenerHandler {
-	auditor := audit.Observer(audit.NewNotifier())
-	if len(auditors) > 0 {
-		auditor = auditors[0]
+// auditor получает события успешного сокращения и перехода; может быть nil.
+// checker используется для защиты внутренних эндпоинтов; может быть nil.
+func NewShortenerHandler(shortener *service.Shortener, checker *middleware.TrustedSubnetChecker, auditor audit.Observer) *ShortenerHandler {
+	return &ShortenerHandler{
+		facade:               NewShortenerFacade(shortener, auditor),
+		trustedSubnetChecker: checker,
 	}
-	return &ShortenerHandler{shortener: shortener, auditor: auditor}
+}
+
+// Facade возвращает общий фасад бизнес-логики для HTTP- и gRPC-обработчиков.
+func (h *ShortenerHandler) Facade() *ShortenerFacade {
+	return h.facade
 }
 
 type batchRequest struct {
@@ -60,6 +66,8 @@ type userURLResponse struct {
 
 func statusFromError(err error) (code int, body string) {
 	switch {
+	case errors.Is(err, auth.ErrNoUserID):
+		return http.StatusUnauthorized, "Unauthorized"
 	case errors.Is(err, service.ErrDeleted):
 		return http.StatusGone, "Gone"
 	case errors.Is(err, service.ErrNotFound):
@@ -89,25 +97,21 @@ func (h *ShortenerHandler) PostShorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, _ := auth.UserIDFromContext(r.Context())
-
-	shortURL, err := h.shortener.Shorten(r.Context(), rawURL, userID)
+	result, err := h.facade.ShortenURL(r.Context(), rawURL)
 	if err != nil {
-		if errors.Is(err, service.ErrURLConflict) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusConflict)
-			w.Write([]byte(shortURL))
-			return
-		}
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
 		return
 	}
+	if result.Conflict {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(result.ShortURL))
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
-	if _, err := w.Write([]byte(shortURL)); err == nil {
-		h.notifyAudit(r, audit.ActionShorten, userID, rawURL)
-	}
+	_, _ = w.Write([]byte(result.ShortURL))
 }
 
 // GetRedirect обрабатывает запросы GET /{id} и перенаправляет на исходный URL.
@@ -117,7 +121,7 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	originalURL, err := h.shortener.GetOriginal(r.Context(), id)
+	originalURL, err := h.facade.ExpandURL(r.Context(), id)
 	if err != nil {
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
@@ -125,9 +129,6 @@ func (h *ShortenerHandler) GetRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
-
-	userID, _ := auth.UserIDFromContext(r.Context())
-	h.notifyAudit(r, audit.ActionFollow, userID, originalURL)
 }
 
 // PostShortenJSON обрабатывает запросы POST /api/shorten с URL в JSON-теле.
@@ -145,30 +146,22 @@ func (h *ShortenerHandler) PostShortenJSON(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	userID, _ := auth.UserIDFromContext(r.Context())
-
-	shortURL, err := h.shortener.Shorten(r.Context(), rawURL, userID)
+	result, err := h.facade.ShortenURL(r.Context(), rawURL)
 	if err != nil {
-		if errors.Is(err, service.ErrURLConflict) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
-			return
-		}
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
+		return
+	}
+	if result.Conflict {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(shortenResponse{Result: result.ShortURL})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(shortenResponse{Result: shortURL}); err == nil {
-		h.notifyAudit(r, audit.ActionShorten, userID, rawURL)
-	}
-}
-
-func (h *ShortenerHandler) notifyAudit(r *http.Request, action, userID, rawURL string) {
-	_ = h.auditor.Notify(r.Context(), audit.NewEvent(action, userID, rawURL))
+	json.NewEncoder(w).Encode(shortenResponse{Result: result.ShortURL})
 }
 
 // PostShortenBatch обрабатывает запросы POST /api/shorten/batch с несколькими URL.
@@ -198,9 +191,7 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	userID, _ := auth.UserIDFromContext(r.Context())
-
-	results, err := h.shortener.ShortenBatch(r.Context(), items, userID)
+	results, err := h.facade.ShortenBatch(r.Context(), items)
 	if err != nil {
 		code, msg := statusFromError(err)
 		http.Error(w, msg, code)
@@ -223,15 +214,10 @@ func (h *ShortenerHandler) PostShortenBatch(w http.ResponseWriter, r *http.Reque
 // GetUserURLs обрабатывает запросы GET /api/user/urls и возвращает URL,
 // принадлежащие аутентифицированному пользователю.
 func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, ok := auth.UserIDFromContext(r.Context())
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	urls, err := h.shortener.GetUserURLs(r.Context(), userID)
+	urls, err := h.facade.ListUserURLs(r.Context())
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
 		return
 	}
 	if len(urls) == 0 {
@@ -254,12 +240,6 @@ func (h *ShortenerHandler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 // DeleteUserURLs обрабатывает запросы DELETE /api/user/urls и планирует удаление
 // URL, принадлежащих аутентифицированному пользователю.
 func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, ok := auth.UserIDFromContext(r.Context())
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -272,8 +252,38 @@ func (h *ShortenerHandler) DeleteUserURLs(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.shortener.DeleteUserURLs(ids, userID)
+	if err := h.facade.DeleteUserURLs(r.Context(), ids); err != nil {
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+type internalStatsResponse struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
+// GetInternalStats обрабатывает запросы GET /api/internal/stats с проверкой доверенной подсети.
+func (h *ShortenerHandler) GetInternalStats(w http.ResponseWriter, r *http.Request) {
+	if h.trustedSubnetChecker == nil || !h.trustedSubnetChecker.Allowed(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	stats, err := h.facade.GetStats(r.Context())
+	if err != nil {
+		code, msg := statusFromError(err)
+		http.Error(w, msg, code)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(internalStatsResponse{
+		URLs:  stats.URLs,
+		Users: stats.Users,
+	})
 }
 
 // PingDB возвращает обработчик, проверяющий подключение к PostgreSQL.

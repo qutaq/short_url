@@ -93,7 +93,13 @@ func run(logger *zap.Logger) error {
 	defer auditObservers.closeFileObserver()
 
 	shortener := service.NewShortener(repo, cfg.BaseURL)
-	h := handler.NewShortenerHandler(shortener, auditor)
+
+	trustedSubnetChecker, err := middleware.NewTrustedSubnetChecker(cfg.TrustedSubnet)
+	if err != nil {
+		logger.Fatal("invalid trusted_subnet", zap.Error(err))
+	}
+
+	h := handler.NewShortenerHandler(shortener, trustedSubnetChecker, auditor)
 
 	r.Get("/ping", handler.PingDB(pool))
 	r.Post("/", h.PostShorten)
@@ -102,20 +108,26 @@ func run(logger *zap.Logger) error {
 	r.Get("/api/user/urls", h.GetUserURLs)
 	r.Delete("/api/user/urls", h.DeleteUserURLs)
 	r.Get("/{id}", h.GetRedirect)
+	r.Get("/api/internal/stats", h.GetInternalStats)
 
 	logger.Info("Server starting", zap.String("address", cfg.ServerAddr))
 
+	listener, err := newListener(cfg.ServerAddr, cfg.EnableHTTPS, logger)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+
 	srv := &http.Server{
-		Addr:    cfg.ServerAddr,
 		Handler: r,
 	}
+	grpcServer := newGRPCServer(h)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	g, groupCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		if err := listenAndServe(srv, cfg.EnableHTTPS, logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := serveMultiplexed(listener, srv, grpcServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil
@@ -124,11 +136,14 @@ func run(logger *zap.Logger) error {
 		<-groupCtx.Done()
 		stop()
 
+		grpcServer.GracefulStop()
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)
 		}
+		_ = listener.Close()
 		return nil
 	})
 

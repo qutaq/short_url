@@ -15,6 +15,9 @@
 cmd/shortener/main
 cmd/shortener/shortener
 
+# Local tools (protoc, autotests binaries, etc.)
+.tools/
+
 # Local configuration
 config.json
 

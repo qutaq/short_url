@@ -328,6 +328,11 @@ func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]UserURLOu
 	return result, nil
 }
 
+// GetStats возвращает количество сокращённых URL и пользователей в сервисе.
+func (s *Shortener) GetStats(ctx context.Context) (repository.Stats, error) {
+	return s.repo.GetStats(ctx)
+}
+
 func (s *Shortener) makeShortURL(id string) string {
 	return s.shortURLPrefix + id
 }

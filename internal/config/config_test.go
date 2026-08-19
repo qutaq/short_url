@@ -159,6 +159,7 @@ func clearConfigEnv(t *testing.T) {
 		"AUDIT_FILE",
 		"AUDIT_URL",
 		"ENABLE_HTTPS",
+		"TRUSTED_SUBNET",
 		"CONFIG",
 	}
 	for _, key := range envKeys {

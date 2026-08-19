@@ -186,6 +186,19 @@ func (r *FileRepository) GetURLsByUser(ctx context.Context, userID string) ([]UR
 	return pairs, nil
 }
 
+// GetStats возвращает количество сокращённых URL и пользователей в файловом хранилище.
+func (r *FileRepository) GetStats(ctx context.Context) (Stats, error) {
+	if err := ctx.Err(); err != nil {
+		return Stats{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return Stats{
+		URLs:  len(r.data),
+		Users: len(r.userURLs),
+	}, nil
+}
+
 func (r *FileRepository) load() error {
 	raw, err := os.ReadFile(r.filePath)
 	if err != nil {
